@@ -66,19 +66,19 @@ def setup_model(params):
     )
     return model
 
-def setup_state_control_props(model, params):
+def setup_state_control_props(params, model):
     """
     Return a (state, controls, prop) tuple defining a transient run
     """
     ## Set 'basic' model properties
     # These properties don't include the glottal gap since you may/may not
     # want to modify the glottal gap based on the swelling level
-    prop = setup_basic_props(model, params)
+    prop = setup_basic_props(params, model)
     model.set_prop(prop)
 
     ## Set the initial state
     # The initial state is based on the post-swelling static configuration
-    state0 = setup_ini_state(model, params)
+    state0 = setup_ini_state(params, model)
 
     # Set the glottal gap based on the post-swelling static configuration
     if (params['ModifyEffect'] == 'const_pregap'
@@ -92,10 +92,10 @@ def setup_state_control_props(model, params):
     prop = _set_glottal_gap_props(prop, ymax, ygap, ycoll_offset)
     model.set_prop(prop)
 
-    controls = setup_controls(model, params)
+    controls = setup_controls(params, model)
     return state0, controls, prop
 
-def setup_basic_props(model, params):
+def setup_basic_props(params, model):
     """
     Set the properties vector
     """
@@ -149,7 +149,7 @@ def setup_basic_props(model, params):
 
     return prop
 
-def setup_controls(model, params):
+def setup_controls(params, model):
     """
     Set the controls
     """
@@ -161,7 +161,7 @@ def setup_controls(model, params):
 
     return [control]
 
-def setup_ini_state(model, params):
+def setup_ini_state(params, model):
     """
     Set the initial state vector
     """
@@ -172,7 +172,7 @@ def setup_ini_state(model, params):
     vcov = params['vcov']
     nload = max(int(round((vcov-1)/0.025)), 1)
 
-    prop = setup_basic_props(model, params)
+    prop = setup_basic_props(params, model)
     model.set_prop(prop)
 
     static_state, _ = solve_static_swollen_config(
@@ -432,7 +432,7 @@ def run(
     # is not pickleable (`ExpParams` instances can't be pickled)
     params = ExpParam(params)
     model = setup_model(params)
-    state0, controls, prop = setup_state_control_props(model, params)
+    state0, controls, prop = setup_state_control_props(params, model)
 
     dt = params['dt']
     tf = params['tf']
