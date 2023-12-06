@@ -7,7 +7,7 @@ import argparse as ap
 import multiprocessing as mp
 import itertools as it
 import functools
-from typing import List, Mapping
+from typing import List
 
 import numpy as np
 import dolfin as dfn
@@ -19,7 +19,6 @@ from femvf.models.dynamical import base as dynbase
 from femvf.postprocess.base import TimeSeries, TimeSeriesStats
 from femvf.postprocess import solid as slsig
 from femvf.load import load_transient_fsi_model
-from blockarray import blockvec as bv
 from exputils import postprocutils, exputils
 
 dfn.set_log_level(50)
@@ -58,19 +57,28 @@ MESH_BASE_NAME = 'M5_CB_GA3_SplitCover'
 MESH_NAME = make_mesh_name(MESH_BASE_NAME, 1.00)
 MESH_PATH = f'mesh/{MESH_NAME}.msh'
 
-def set_state_control_props(model, params):
+def setup_model(params):
+    mesh_path = f"mesh/{make_mesh_name(params['MeshName'], params['clscale'])}.msh"
+    model = load_transient_fsi_model(
+        mesh_path, None,
+        SolidType=solid.SwellingKelvinVoigtWEpitheliumNoShape,
+        FluidType=fluid.BernoulliAreaRatioSep
+    )
+    return model
+
+def setup_state_control_props(model, params):
     """
     Return a (state, controls, prop) tuple defining a transient run
     """
     ## Set 'basic' model properties
     # These properties don't include the glottal gap since you may/may not
     # want to modify the glottal gap based on the swelling level
-    prop = set_basic_props(model, params)
+    prop = setup_basic_props(model, params)
     model.set_prop(prop)
 
     ## Set the initial state
     # The initial state is based on the post-swelling static configuration
-    state0 = set_ini_state(model, params)
+    state0 = setup_ini_state(model, params)
 
     # Set the glottal gap based on the post-swelling static configuration
     if (params['ModifyEffect'] == 'const_pregap'
@@ -84,10 +92,10 @@ def set_state_control_props(model, params):
     prop = _set_glottal_gap_props(prop, ymax, ygap, ycoll_offset)
     model.set_prop(prop)
 
-    controls = set_controls(model, params)
+    controls = setup_controls(model, params)
     return state0, controls, prop
 
-def set_basic_props(model, params):
+def setup_basic_props(model, params):
     """
     Set the properties vector
     """
@@ -140,6 +148,39 @@ def set_basic_props(model, params):
     prop = _set_layer_props(prop, emods, cellregion_to_sdof)
 
     return prop
+
+def setup_controls(model, params):
+    """
+    Set the controls
+    """
+    control = model.control.copy()
+    control[:] = 0
+
+    control['psub'] = params['psub']
+    control['psup'] = 0.0
+
+    return [control]
+
+def setup_ini_state(model, params):
+    """
+    Set the initial state vector
+    """
+    state0 = model.state0.copy()
+    state0[:] = 0.0
+    model.solid.control[:] = 0.0
+
+    vcov = params['vcov']
+    nload = max(int(round((vcov-1)/0.025)), 1)
+
+    prop = setup_basic_props(model, params)
+    model.set_prop(prop)
+
+    static_state, _ = solve_static_swollen_config(
+        model.solid, model.solid.control, model.solid.prop, nload
+    )
+
+    state0[['u', 'v', 'a']] = static_state
+    return state0
 
 def _set_swelling_props(prop, v, m, cellregion_to_sdof, modify_density=True, modify_geometry=True):
     """
@@ -216,38 +257,6 @@ def _set_glottal_gap_props(prop, ymax, ygap, ycoll_offset):
     prop['ymid'] = ymax + ygap
     return prop
 
-def set_controls(model, params):
-    """
-    Set the controls
-    """
-    control = model.control.copy()
-    control[:] = 0
-
-    control['psub'] = params['psub']
-    control['psup'] = 0.0
-
-    return [control]
-
-def set_ini_state(model, params):
-    """
-    Set the initial state vector
-    """
-    state0 = model.state0.copy()
-    state0[:] = 0.0
-    model.solid.control[:] = 0.0
-
-    vcov = params['vcov']
-    nload = max(int(round((vcov-1)/0.025)), 1)
-
-    prop = set_basic_props(model, params)
-    model.set_prop(prop)
-
-    static_state, _ = solve_static_swollen_config(
-        model.solid, model.solid.control, model.solid.prop, nload
-    )
-
-    state0[['u', 'v', 'a']] = static_state
-    return state0
 
 def solve_static_swollen_config(model, control, prop, nload=1):
     """
@@ -278,14 +287,137 @@ def solve_static_swollen_config(model, control, prop, nload=1):
         )
     return static_state_n, info
 
-def load_model(params):
-    mesh_path = f"mesh/{make_mesh_name(params['MeshName'], params['clscale'])}.msh"
-    model = load_transient_fsi_model(
-        mesh_path, None,
-        SolidType=solid.SwellingKelvinVoigtWEpitheliumNoShape,
-        FluidType=fluid.BernoulliAreaRatioSep
-    )
-    return model
+
+def make_exp_params(study_name):
+    if study_name == 'none':
+        paramss = []
+    elif study_name == 'test':
+        vcovs = [1.0, 1.3]
+        paramss = [
+            ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': 1,
+                'Ecov': ECOV, 'Ebod': EBOD,
+                'vcov': vcov,
+                'mcov': -0.8,
+                'psub': 300*10,
+                'dt': 1.25e-5, 'tf': 0.2,
+                'ModifyEffect': ''
+            })
+            for vcov in vcovs
+        ]
+    elif study_name == 'debug_time_psub':
+        vcovs = [1.0, 1.3]
+        fdts = [1, 2, 4, 8]
+        paramss = [
+            ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': 1,
+                'Ecov': ECOV, 'Ebod': EBOD,
+                'vcov': vcov,
+                'mcov': -0.8,
+                'psub': 300*10,
+                'dt': 1.25e-5/fdt, 'tf': 0.2,
+                'ModifyEffect': ''
+            })
+            for fdt in fdts
+            for vcov in vcovs
+        ]
+    elif study_name == 'mesh_time_independence':
+        def make_params(clscale, dt):
+            return ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': clscale,
+                'Ecov': ECOV, 'Ebod': EBOD,
+                'vcov': 1.3,
+                'mcov': -1.6,
+                'psub': PSUB,
+                'dt': dt, 'tf': 0.5,
+                'ModifyEffect': ''
+            })
+
+        clscales = 1 * 2.0**np.arange(1, -2, -1)
+        dts = 5e-5 * 2.0**np.arange(0, -5, -1)
+        paramss = [
+            make_params(clscale, dt) for clscale in clscales for dt in dts
+        ]
+    elif study_name == 'main':
+        def make_params(elayers, vcov, mcov):
+            return ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'vcov': vcov,
+                'mcov': mcov,
+                'psub': PSUB,
+                'dt': DT, 'tf': TF,
+                'ModifyEffect': ''
+            })
+
+        paramss = [
+            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+        ]
+    elif study_name == 'main_coarse':
+        def make_params(elayers, vcov, mcov):
+            return ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'vcov': vcov,
+                'mcov': mcov,
+                'psub': PSUB,
+                'dt': 2e-4, 'tf': 0.5,
+                'ModifyEffect': ''
+            })
+
+        paramss = [
+            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+        ]
+    elif study_name == 'const_pregap':
+        def make_params(elayers, vcov, mcov):
+            return ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'vcov': vcov,
+                'mcov': mcov,
+                'psub': PSUB,
+                'dt': DT, 'tf': TF,
+                'ModifyEffect': 'const_pregap'
+            })
+
+        paramss = [
+            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+        ]
+    elif study_name == 'const_mass':
+        def make_params(elayers, vcov, mcov):
+            return ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'vcov': vcov,
+                'mcov': mcov,
+                'psub': PSUB,
+                'dt': DT, 'tf': TF,
+                'ModifyEffect': 'const_mass'
+            })
+
+        paramss = [
+            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+        ]
+    elif study_name == 'const_mass_pregap':
+        def make_params(elayers, vcov, mcov):
+            return ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'vcov': vcov,
+                'mcov': mcov,
+                'psub': PSUB,
+                'dt': DT, 'tf': TF,
+                'ModifyEffect': 'const_mass_pregap'
+            })
+
+        paramss = [
+            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+        ]
+    else:
+        raise ValueError(f"Unknown `--study-name` {study_name}")
+
+    return paramss
+
 
 ## Main functions for running/postprocessing simulations
 def run(
@@ -299,8 +431,8 @@ def run(
     # This is needed because you can't call `run` in parallel if `params`
     # is not pickleable (`ExpParams` instances can't be pickled)
     params = ExpParam(params)
-    model = load_model(params)
-    state0, controls, prop = set_state_control_props(model, params)
+    model = setup_model(params)
+    state0, controls, prop = setup_state_control_props(model, params)
 
     dt = params['dt']
     tf = params['tf']
@@ -428,7 +560,7 @@ def get_model(in_fpath):
     """Return the model"""
     in_fname = path.splitext(path.split(in_fpath)[-1])[0]
     params = ExpParam(in_fname)
-    return load_model(params)
+    return setup_model(params)
 
 if __name__ == '__main__':
     parser = ap.ArgumentParser()
@@ -438,12 +570,12 @@ if __name__ == '__main__':
     parser.add_argument("--overwrite-results", type=str, action='extend', nargs='+')
     parser.add_argument("--default-dt", type=float, default=1.25e-5)
     parser.add_argument("--default-tf", type=float, default=0.5)
-    args = parser.parse_args()
+    clargs = parser.parse_args()
 
-    TF = args.default_tf
-    DT = args.default_dt
+    TF = clargs.default_tf
+    DT = clargs.default_dt
 
-    postprocess = functools.partial(postprocess, overwrite_results=args.overwrite_results)
+    postprocess = functools.partial(postprocess, overwrite_results=clargs.overwrite_results)
 
     # Pack up the emod arguments to a dict format
     _emods = np.array([[2.5, 5.0]])*1e3 * 10
@@ -453,143 +585,17 @@ if __name__ == '__main__':
         for layer_values in _emods
     ]
 
-    if args.study_name == 'none':
-        paramss = []
-    elif args.study_name == 'test':
-        vcovs = [1.0, 1.3]
-        paramss = [
-            ExpParam({
-                'MeshName': MESH_BASE_NAME, 'clscale': 1,
-                'Ecov': ECOV, 'Ebod': EBOD,
-                'vcov': vcov,
-                'mcov': -0.8,
-                'psub': 300*10,
-                'dt': 1.25e-5, 'tf': 0.2,
-                'ModifyEffect': ''
-            })
-            for vcov in vcovs
-        ]
-    elif args.study_name == 'debug_time_psub':
-        vcovs = [1.0, 1.3]
-        fdts = [1, 2, 4, 8]
-        paramss = [
-            ExpParam({
-                'MeshName': MESH_BASE_NAME, 'clscale': 1,
-                'Ecov': ECOV, 'Ebod': EBOD,
-                'vcov': vcov,
-                'mcov': -0.8,
-                'psub': 300*10,
-                'dt': 1.25e-5/fdt, 'tf': 0.2,
-                'ModifyEffect': ''
-            })
-            for fdt in fdts
-            for vcov in vcovs
-        ]
-    elif args.study_name == 'mesh_time_independence':
-        def make_params(clscale, dt):
-            return ExpParam({
-                'MeshName': MESH_BASE_NAME, 'clscale': clscale,
-                'Ecov': ECOV, 'Ebod': EBOD,
-                'vcov': 1.3,
-                'mcov': -1.6,
-                'psub': PSUB,
-                'dt': dt, 'tf': 0.5,
-                'ModifyEffect': ''
-            })
-
-        clscales = 1 * 2.0**np.arange(1, -2, -1)
-        dts = 5e-5 * 2.0**np.arange(0, -5, -1)
-        paramss = [
-            make_params(clscale, dt) for clscale in clscales for dt in dts
-        ]
-    elif args.study_name == 'main':
-        def make_params(elayers, vcov, mcov):
-            return ExpParam({
-                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
-                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'vcov': vcov,
-                'mcov': mcov,
-                'psub': PSUB,
-                'dt': DT, 'tf': TF,
-                'ModifyEffect': ''
-            })
-
-        paramss = [
-            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
-        ]
-    elif args.study_name == 'main_coarse':
-        def make_params(elayers, vcov, mcov):
-            return ExpParam({
-                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
-                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'vcov': vcov,
-                'mcov': mcov,
-                'psub': PSUB,
-                'dt': 2e-4, 'tf': 0.5,
-                'ModifyEffect': ''
-            })
-
-        paramss = [
-            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
-        ]
-    elif args.study_name == 'const_pregap':
-        def make_params(elayers, vcov, mcov):
-            return ExpParam({
-                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
-                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'vcov': vcov,
-                'mcov': mcov,
-                'psub': PSUB,
-                'dt': DT, 'tf': TF,
-                'ModifyEffect': 'const_pregap'
-            })
-
-        paramss = [
-            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
-        ]
-    elif args.study_name == 'const_mass':
-        def make_params(elayers, vcov, mcov):
-            return ExpParam({
-                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
-                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'vcov': vcov,
-                'mcov': mcov,
-                'psub': PSUB,
-                'dt': DT, 'tf': TF,
-                'ModifyEffect': 'const_mass'
-            })
-
-        paramss = [
-            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
-        ]
-    elif args.study_name == 'const_mass_pregap':
-        def make_params(elayers, vcov, mcov):
-            return ExpParam({
-                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
-                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'vcov': vcov,
-                'mcov': mcov,
-                'psub': PSUB,
-                'dt': DT, 'tf': TF,
-                'ModifyEffect': 'const_mass_pregap'
-            })
-
-        paramss = [
-            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
-        ]
-    else:
-        raise ValueError(f"Unknown `--study-name` {args.study_name}")
-
-    ## Run/postprocess simulations
-    out_dir = args.output_dir
+    ## Run and postprocess simulations
+    out_dir = clargs.output_dir
+    paramss = make_exp_params(clargs.study_name)
     paramss_dict = [params.data for params in paramss]
-    if args.num_proc > 1:
+    if clargs.num_proc > 1:
         _run = functools.partial(run, out_dir=out_dir)
-        with mp.Pool(processes=args.num_proc) as pool:
-            print(f"Pool running with {args.num_proc:d} processors")
+        with mp.Pool(processes=clargs.num_proc) as pool:
+            print(f"Pool running with {clargs.num_proc:d} processors")
             in_fpaths = pool.map(_run, paramss_dict, chunksize=1)
     else:
         in_fpaths = [run(params, out_dir) for params in paramss_dict]
 
     out_fpath = f'{out_dir}/postprocess.h5'
-    postprocess(out_fpath, in_fpaths, num_proc=args.num_proc)
+    postprocess(out_fpath, in_fpaths, num_proc=clargs.num_proc)
