@@ -24,6 +24,8 @@ from exputils import postprocutils, exputils
 dfn.set_log_level(50)
 
 ## Defaults for 'nominal' parameter values
+MESH_BASE_NAME = 'M5_BC_GA3'
+
 CLSCALE = 1
 
 POISSONS_RATIO = 0.4
@@ -38,6 +40,8 @@ EBOD = 5e4
 
 PARAM_SPEC = {
     'MeshName': str,
+    'DZ': float,
+    'NZ': int,
     'clscale': float,
     'Ecov': float,
     'Ebod': float,
@@ -50,19 +54,28 @@ PARAM_SPEC = {
 }
 ExpParam = exputils.make_parameters(PARAM_SPEC)
 
-def make_mesh_name(base_name, clscale):
-    return f'{base_name}--clscale{clscale:.2e}'
-
-MESH_BASE_NAME = 'M5_CB_GA3_SplitCover'
-MESH_NAME = make_mesh_name(MESH_BASE_NAME, 1.00)
-MESH_PATH = f'mesh/{MESH_NAME}.msh'
+def setup_mesh_name(params):
+    base_name = params['MeshName']
+    clscale = params['clscale']
+    dz = params['DZ']
+    nz = params['NZ']
+    return f'{base_name}--DZ{dz:.2f}--NZ{nz:d}--clscale{clscale:.2e}'
 
 def setup_model(params):
-    mesh_path = f"mesh/{make_mesh_name(params['MeshName'], params['clscale'])}.msh"
+    mesh_path = f"mesh/{setup_mesh_name(params)}.msh"
+
+    if params['DZ'] == 0.0:
+        zs = None
+    elif params['DZ'] > 0.0:
+        zs = np.linspace(0, params['DZ'], params['NZ']+1)
+    else:
+        raise ValueError("Parameter 'DZ' must be >= 0")
+
     model = load_transient_fsi_model(
         mesh_path, None,
         SolidType=solid.SwellingKelvinVoigtWEpitheliumNoShape,
-        FluidType=fluid.BernoulliAreaRatioSep
+        FluidType=fluid.BernoulliAreaRatioSep,
+        zs=zs
     )
     return model
 
@@ -89,7 +102,12 @@ def setup_state_control_props(params, model):
         ymax = (model.solid.XREF)[1::2].max()
     ygap = 0.03 # 0.3 mm half-gap -> 0.6 mm glottal gap
     ycoll_offset = 1/10*ygap
-    prop = _set_glottal_gap_props(prop, ymax, ygap, ycoll_offset)
+
+    prop['ycontact'] = ymax + ygap - ycoll_offset
+    prop['ymid'] = ymax + ygap
+    for n in range(len(model.fluids)):
+        prop[f'fluid{n}.area_lb'] = 2*ycoll_offset
+
     model.set_prop(prop)
 
     controls = setup_controls(params, model)
@@ -117,8 +135,9 @@ def setup_basic_props(params, model):
     # prop['ncontact'] = [0, 1]
 
     ## Fluid constant properties
-    prop['r_sep'] = 1.2
-    prop['rho_air'] = 1.2e-3
+    for n in range(len(model.fluids)):
+        prop[f'fluid{n}.r_sep'] = 1.2
+        prop[f'fluid{n}.rho_air'] = 1.2e-3
 
     ## Swelling specific properties
     if (
@@ -156,8 +175,9 @@ def setup_controls(params, model):
     control = model.control.copy()
     control[:] = 0
 
-    control['psub'] = params['psub']
-    control['psup'] = 0.0
+    for n in range(len(model.fluids)):
+        control[f'fluid{n}.psub'] = params['psub']
+        control[f'fluid{n}.psup'] = 0.0
 
     return [control]
 
@@ -196,9 +216,14 @@ def _set_swelling_props(prop, v, m, cellregion_to_sdof, modify_density=True, mod
     # KSWELL_FACTOR = 20
 
     # Apply swelling parameters to the cover layer only
+    # dofs_cov = np.unique(
+    #     np.concatenate(
+    #         [cellregion_to_sdof[label] for label in ['medial', 'inferior', 'superior']]
+    #     )
+    # )
     dofs_cov = np.unique(
         np.concatenate(
-            [cellregion_to_sdof[label] for label in ['medial', 'inferior', 'superior']]
+            [cellregion_to_sdof[label] for label in ['cover']]
         )
     )
     dofs_bod = cellregion_to_sdof['body']
@@ -232,9 +257,14 @@ def _set_layer_props(prop, emods, cellregion_to_sdof):
     cellregion_to_sdof:
         A mapping from names regions to mesh function values
     """
+    # dofs_cov = np.unique(
+    #     np.concatenate(
+    #         [cellregion_to_sdof[label] for label in ['medial', 'inferior', 'superior']]
+    #     )
+    # )
     dofs_cov = np.unique(
         np.concatenate(
-            [cellregion_to_sdof[label] for label in ['medial', 'inferior', 'superior']]
+            [cellregion_to_sdof[label] for label in ['cover']]
         )
     )
     dofs_bod = cellregion_to_sdof['body']
@@ -248,13 +278,6 @@ def _set_layer_props(prop, emods, cellregion_to_sdof):
     # prop['emod_membrane'][:] = 0.0
     prop['th_membrane'][:] = 0.005
     prop['nu_membrane'][:] = POISSONS_RATIO
-    return prop
-
-def _set_glottal_gap_props(prop, ymax, ygap, ycoll_offset):
-    ## Set contact and symmetry plane locations
-    prop['ycontact'] = ymax + ygap - ycoll_offset
-    prop['area_lb'] = 2*ycoll_offset
-    prop['ymid'] = ymax + ygap
     return prop
 
 
@@ -293,14 +316,16 @@ def make_exp_params(study_name):
         paramss = []
     elif study_name == 'test':
         vcovs = [1.0, 1.3]
+        vcovs = [1.0]
         paramss = [
             ExpParam({
-                'MeshName': MESH_BASE_NAME, 'clscale': 1,
+                'MeshName': MESH_BASE_NAME, 'clscale': 0.5,
+                'DZ': 1.50, 'NZ': 10,
                 'Ecov': ECOV, 'Ebod': EBOD,
                 'vcov': vcov,
                 'mcov': -0.8,
                 'psub': 300*10,
-                'dt': 1.25e-5, 'tf': 0.2,
+                'dt': 1.25e-5, 'tf': 0.001,
                 'ModifyEffect': ''
             })
             for vcov in vcovs
@@ -469,19 +494,21 @@ def postprocess(
                 num_proc=num_proc, overwrite_results=overwrite_results
             )
 
-def get_result_to_proc(model):
+def get_result_to_proc(model: trabase.BaseTransientModel):
     """Return the mapping of results to post-processing functions"""
-    proc_gw = slsig.MinGlottalWidth(model)
+    proc_gw = slsig.MeanGlottalWidth(model)
 
-    cell_label_to_id = model.solid.forms['mesh.cell_label_to_id']
-    dx = model.solid.forms['measure.dx']
-    dx_cover = (
-        dx(int(cell_label_to_id['medial']))
-        + dx(int(cell_label_to_id['inferior']))
-        + dx(int(cell_label_to_id['superior']))
-    )
-    dx_medial = dx(int(cell_label_to_id['medial']))
-    ds_medial = model.solid.forms['measure.ds_traction']
+    cell_label_to_id = model.solid.residual.mesh_function_label_to_value('cell')
+    facet_label_to_id = model.solid.residual.mesh_function_label_to_value('facet')
+    dx = model.solid.residual.measure('dx')
+    # dx_cover = (
+    #     dx(int(cell_label_to_id['medial']))
+    #     + dx(int(cell_label_to_id['inferior']))
+    #     + dx(int(cell_label_to_id['superior']))
+    # )
+    dx_cover = dx(int(cell_label_to_id['cover']))
+    # dx_medial = dx(int(cell_label_to_id['medial']))
+    ds_medial = model.solid.residual.measure('ds')(int(facet_label_to_id['pressure']))
     proc_visc_rate = slsig.ViscousDissipationRate(model, dx=dx_cover)
 
     ## Project field variables onto a DG0 space
@@ -578,7 +605,7 @@ if __name__ == '__main__':
     postprocess = functools.partial(postprocess, overwrite_results=clargs.overwrite_results)
 
     # Pack up the emod arguments to a dict format
-    _emods = np.array([[2.5, 5.0]])*1e3 * 10
+    _emods = np.array([[2.5, 5.0]]) * 1e3 * 10
     layer_labels = ['cover', 'body']
     EMODS = [
         {label: value for label, value in zip(layer_labels, layer_values)}
