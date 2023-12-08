@@ -512,7 +512,7 @@ def get_result_to_proc(model: trabase.BaseTransientModel):
     proc_visc_rate = slsig.ViscousDissipationRate(model, dx=dx_cover)
 
     ## Project field variables onto a DG0 space
-    fspace_dg0 = model.solid.forms['fspace.scalar_dg0']
+    fspace_dg0 = model.solid.residual.form['coeff.fsi.p1'].function_space()
     proc_hydro_field = slsig.StressHydrostaticField(model)
     proc_vm_field = slsig.StressVonMisesField(model)
     proc_visc_diss_rate_field = slsig.ViscousDissipationField(
@@ -528,7 +528,7 @@ def get_result_to_proc(model: trabase.BaseTransientModel):
 
     ## Project field variables onto a CG1 space
     proc_ymom_field = slsig.YMomentum(
-        model, dx=dx, fspace=model.solid.forms['fspace.scalar']
+        model, dx=dx, fspace=model.solid.residual.form['coeff.fsi.p1'].function_space()
     )
 
     ## Compute spatial statistics of field variables
@@ -556,7 +556,10 @@ def get_result_to_proc(model: trabase.BaseTransientModel):
         return f.get_times()
 
     def proc_q(f):
-        qs = [f.get_state(ii)['q'][0] for ii in range(f.size)]
+        qs = [
+            np.sum([f.get_state(ii)[f'fluid{n}.q'][0] for n in range(len(f.model.fluids))])
+            for ii in range(f.size)
+        ]
         return np.array(qs)
 
     signal_to_proc = {
@@ -576,9 +579,9 @@ def get_result_to_proc(model: trabase.BaseTransientModel):
         'signal_spatial_stats_con_p': TimeSeries(make_cpressure_field_stats()),
         'signal_spatial_stats_con_a': TimeSeries(make_carea_field_stats()),
         'signal_spatial_stats_viscous': TimeSeries(make_wvisc_field_stats(dx_cover)),
-        'signal_spatial_stats_viscous_medial': TimeSeries(make_wvisc_field_stats(dx_medial)),
+        # 'signal_spatial_stats_viscous_medial': TimeSeries(make_wvisc_field_stats(dx_medial)),
         'signal_spatial_stats_vm': TimeSeries(make_svm_field_stats(dx_cover)),
-        'signal_spatial_stats_vm_medial': TimeSeries(make_svm_field_stats(dx_medial)),
+        # 'signal_spatial_stats_vm_medial': TimeSeries(make_svm_field_stats(dx_medial)),
         'signal_spatial_state_ymom': TimeSeries(make_ymom_field_stats())
     }
     return signal_to_proc
