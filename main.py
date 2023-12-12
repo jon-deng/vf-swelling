@@ -333,6 +333,22 @@ def make_exp_params(study_name):
             })
             for vcov in vcovs
         ]
+    elif study_name == 'test_3d_onset':
+        psubs = 10*np.arange(300, 1001, 100)
+        paramss = [
+            ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': 0.5,
+                'GA': 3,
+                'DZ': 1.50, 'NZ': 10,
+                'Ecov': ECOV, 'Ebod': EBOD,
+                'vcov': vcov,
+                'mcov': -0.8,
+                'psub': psub,
+                'dt': 1.25e-5, 'tf': 0.1,
+                'ModifyEffect': ''
+            })
+            for psub in psubs
+        ]
     elif study_name == 'debug_time_psub':
         vcovs = [1.0, 1.3]
         fdts = [1, 2, 4, 8]
