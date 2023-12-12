@@ -24,7 +24,7 @@ from exputils import postprocutils, exputils
 dfn.set_log_level(50)
 
 ## Defaults for 'nominal' parameter values
-MESH_BASE_NAME = 'M5_BC_GA3'
+MESH_BASE_NAME = 'M5_BC'
 
 CLSCALE = 1
 
@@ -40,6 +40,7 @@ EBOD = 5e4
 
 PARAM_SPEC = {
     'MeshName': str,
+    'GA': float,
     'DZ': float,
     'NZ': int,
     'clscale': float,
@@ -56,10 +57,11 @@ ExpParam = exputils.make_parameters(PARAM_SPEC)
 
 def setup_mesh_name(params):
     base_name = params['MeshName']
+    ga = params['GA']
     clscale = params['clscale']
     dz = params['DZ']
     nz = params['NZ']
-    return f'{base_name}--DZ{dz:.2f}--NZ{nz:d}--clscale{clscale:.2e}'
+    return f'{base_name}--GA{ga:.2f}--DZ{dz:.2f}--NZ{nz:d}--clscale{clscale:.2e}'
 
 def setup_model(params):
     mesh_path = f"mesh/{setup_mesh_name(params)}.msh"
@@ -320,12 +322,13 @@ def make_exp_params(study_name):
         paramss = [
             ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': 0.5,
+                'GA': 3,
                 'DZ': 1.50, 'NZ': 10,
                 'Ecov': ECOV, 'Ebod': EBOD,
                 'vcov': vcov,
                 'mcov': -0.8,
                 'psub': 300*10,
-                'dt': 1.25e-5, 'tf': 0.001,
+                'dt': 1.25e-5, 'tf': 0.1,
                 'ModifyEffect': ''
             })
             for vcov in vcovs
