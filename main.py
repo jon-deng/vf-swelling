@@ -341,7 +341,7 @@ def make_exp_params(study_name):
                 'GA': 3,
                 'DZ': 1.50, 'NZ': 10,
                 'Ecov': ECOV, 'Ebod': EBOD,
-                'vcov': vcov,
+                'vcov': 1.0,
                 'mcov': -0.8,
                 'psub': psub,
                 'dt': 1.25e-5, 'tf': 0.1,
