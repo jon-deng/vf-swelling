@@ -2,24 +2,28 @@
 Run a sequence of vocal fold simulations with swelling
 """
 
+from typing import List, Tuple, Mapping, Optional
+from numpy.typing import NDArray
+
 from os import path
 import argparse as ap
 import multiprocessing as mp
 import itertools as it
 import functools
-from typing import List
 
 import numpy as np
 import dolfin as dfn
 import h5py
 
 from femvf import forward, static, statefile as sf, meshutils
-from femvf.models.transient import solid, fluid, base as trabase
+from femvf.models.transient import solid, fluid, base as trabase, coupled
 from femvf.models.dynamical import base as dynbase
 from femvf.postprocess.base import TimeSeries, TimeSeriesStats
 from femvf.postprocess import solid as slsig
 from femvf.load import load_transient_fsi_model
 from exputils import postprocutils, exputils
+
+from blockarray import blockvec as bv
 
 dfn.set_log_level(50)
 
@@ -55,7 +59,12 @@ PARAM_SPEC = {
 }
 ExpParam = exputils.make_parameters(PARAM_SPEC)
 
-def setup_mesh_name(params):
+Model = coupled.BaseTransientFSIModel
+
+def setup_mesh_name(params: ExpParam) -> str:
+    """
+    Return the name of the mesh
+    """
     base_name = params['MeshName']
     ga = params['GA']
     clscale = params['clscale']
@@ -63,7 +72,10 @@ def setup_mesh_name(params):
     nz = params['NZ']
     return f'{base_name}--GA{ga:.2f}--DZ{dz:.2f}--NZ{nz:d}--clscale{clscale:.2e}'
 
-def setup_model(params):
+def setup_model(params: ExpParam) -> Model:
+    """
+    Return the model
+    """
     mesh_path = f"mesh/{setup_mesh_name(params)}.msh"
 
     if params['DZ'] == 0.0:
@@ -81,7 +93,9 @@ def setup_model(params):
     )
     return model
 
-def setup_state_control_props(params, model):
+def setup_state_control_props(
+        params: ExpParam, model: Model
+    ) -> Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector]:
     """
     Return a (state, controls, prop) tuple defining a transient run
     """
@@ -115,7 +129,7 @@ def setup_state_control_props(params, model):
     controls = setup_controls(params, model)
     return state0, controls, prop
 
-def setup_basic_props(params, model):
+def setup_basic_props(params: ExpParam, model: Model) -> bv.BlockVector:
     """
     Set the properties vector
     """
@@ -170,7 +184,7 @@ def setup_basic_props(params, model):
 
     return prop
 
-def setup_controls(params, model):
+def setup_controls(params: ExpParam, model: Model) -> bv.BlockVector:
     """
     Set the controls
     """
@@ -183,7 +197,7 @@ def setup_controls(params, model):
 
     return [control]
 
-def setup_ini_state(params, model):
+def setup_ini_state(params: ExpParam, model: Model) -> bv.BlockVector:
     """
     Set the initial state vector
     """
@@ -204,7 +218,13 @@ def setup_ini_state(params, model):
     state0[['u', 'v', 'a']] = static_state
     return state0
 
-def _set_swelling_props(prop, v, m, cellregion_to_sdof, modify_density=True, modify_geometry=True):
+def _set_swelling_props(
+        prop: bv.BlockVector,
+        v: float, m: float,
+        cellregion_to_sdof: Mapping[str, NDArray],
+        modify_density=True,
+        modify_geometry=True
+    ) -> bv.BlockVector:
     """
     Set properties related to the level of swelling
 
@@ -246,7 +266,11 @@ def _set_swelling_props(prop, v, m, cellregion_to_sdof, modify_density=True, mod
 
     return prop
 
-def _set_layer_props(prop, emods, cellregion_to_sdof):
+def _set_layer_props(
+        prop: bv.BlockVector,
+        emods: Mapping[str, float],
+        cellregion_to_sdof: Mapping[str, NDArray]
+    ) -> bv.BlockVector:
     """
     Set properties for each layer of a model
 
@@ -283,7 +307,12 @@ def _set_layer_props(prop, emods, cellregion_to_sdof):
     return prop
 
 
-def solve_static_swollen_config(model, control, prop, nload=1):
+def solve_static_swollen_config(
+        model: Model,
+        control: bv.BlockVector,
+        prop: bv.BlockVector,
+        nload: int=1
+    ):
     """
     Solve for the static swollen configuration
 
@@ -313,7 +342,7 @@ def solve_static_swollen_config(model, control, prop, nload=1):
     return static_state_n, info
 
 
-def make_exp_params(study_name):
+def make_exp_params(study_name: str) -> List[ExpParam]:
     if study_name == 'none':
         paramss = []
     elif study_name == 'test':
@@ -495,7 +524,8 @@ def run(
 
 def postprocess(
         out_fpath: str, in_fpaths: List[str],
-        overwrite_results=None, num_proc=1
+        overwrite_results: Optional[List[str]]=None,
+        num_proc: int=1
     ):
     """
     Postprocess key signals from the simulations
@@ -605,7 +635,7 @@ def get_result_to_proc(model: trabase.BaseTransientModel):
     }
     return signal_to_proc
 
-def get_model(in_fpath):
+def get_model(in_fpath: str) -> Model:
     """Return the model"""
     in_fname = path.splitext(path.split(in_fpath)[-1])[0]
     params = ExpParam(in_fname)
