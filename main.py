@@ -110,12 +110,15 @@ def setup_state_control_props(
     state0 = setup_ini_state(params, model)
 
     # Set the glottal gap based on the post-swelling static configuration
+    ndim = model.solid.residual.mesh().topology().dim()
     if (params['ModifyEffect'] == 'const_pregap'
         or params['ModifyEffect'] == 'const_mass_pregap'
         ):
-        ymax = (model.solid.XREF + state0.sub['u'])[1::2].max()
+        # Using the `ndim` to space things ensures you get the y-coordinate
+        # for both 2D and 3D meshes
+        ymax = (model.solid.XREF + state0.sub['u'])[1::ndim].max()
     else:
-        ymax = (model.solid.XREF)[1::2].max()
+        ymax = (model.solid.XREF)[1::ndim].max()
     ygap = 0.03 # 0.3 mm half-gap -> 0.6 mm glottal gap
     ycoll_offset = 1/10*ygap
 
