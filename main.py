@@ -349,8 +349,8 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
     if study_name == 'none':
         paramss = []
     elif study_name == 'test':
-        vcovs = [1.0, 1.3]
-        vcovs = [1.0]
+        vcovs = [1.0, 1.1, 1.2, 1.3]
+        # vcovs = [1.0]
         paramss = [
             ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': 0.5,
@@ -418,7 +418,24 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         def make_params(elayers, vcov, mcov):
             return ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'DZ': 0.00, 'NZ': 1,
                 'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'vcov': vcov,
+                'mcov': mcov,
+                'psub': PSUB,
+                'dt': DT, 'tf': TF,
+                'ModifyEffect': ''
+            })
+
+        paramss = [
+            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+        ]
+    elif study_name == 'main_3D':
+        def make_params(elayers, vcov, mcov):
+            return ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'DZ': 1.5, 'NZ': 10,
                 'vcov': vcov,
                 'mcov': mcov,
                 'psub': PSUB,
@@ -433,6 +450,23 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         def make_params(elayers, vcov, mcov):
             return ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'DZ': 0.00, 'NZ': 1,
+                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'vcov': vcov,
+                'mcov': mcov,
+                'psub': PSUB,
+                'dt': 2e-4, 'tf': 0.5,
+                'ModifyEffect': ''
+            })
+
+        paramss = [
+            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+        ]
+    elif study_name == 'main_coarse_3D':
+        def make_params(elayers, vcov, mcov):
+            return ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'DZ': 1.5, 'NZ': 10,
                 'Ecov': elayers['cover'], 'Ebod': elayers['body'],
                 'vcov': vcov,
                 'mcov': mcov,
