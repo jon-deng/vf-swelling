@@ -376,7 +376,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'vcov': 1.0,
                 'mcov': -0.8,
                 'psub': psub,
-                'dt': 1.25e-5, 'tf': 0.1,
+                'dt': 1.25e-5, 'tf': 0.0125,
                 'ModifyEffect': ''
             })
             for psub in psubs
