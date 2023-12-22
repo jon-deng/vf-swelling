@@ -30,7 +30,7 @@ dfn.set_log_level(50)
 ## Defaults for 'nominal' parameter values
 MESH_BASE_NAME = 'M5_BC'
 
-CLSCALE = 1
+CLSCALE = 0.5
 
 POISSONS_RATIO = 0.4
 
