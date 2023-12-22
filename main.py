@@ -455,7 +455,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'vcov': vcov,
                 'mcov': mcov,
                 'psub': PSUB,
-                'dt': 2e-4, 'tf': 0.5,
+                'dt': 1e-4, 'tf': 0.5,
                 'ModifyEffect': ''
             })
 
@@ -470,8 +470,8 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'Ecov': elayers['cover'], 'Ebod': elayers['body'],
                 'vcov': vcov,
                 'mcov': mcov,
-                'psub': PSUB,
-                'dt': 2e-4, 'tf': 0.5,
+                'psub': 600*10,
+                'dt': 1e-4, 'tf': 0.5,
                 'ModifyEffect': ''
             })
 
