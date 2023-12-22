@@ -438,7 +438,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'GA': 3, 'DZ': 1.5, 'NZ': 10,
                 'vcov': vcov,
                 'mcov': mcov,
-                'psub': PSUB,
+                'psub': 600*10,
                 'dt': DT, 'tf': TF,
                 'ModifyEffect': ''
             })
