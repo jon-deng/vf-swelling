@@ -350,7 +350,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         paramss = []
     elif study_name == 'test':
         vcovs = [1.0, 1.1, 1.2, 1.3]
-        # vcovs = [1.0]
+        vcovs = [1.0]
         paramss = [
             ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': 0.5,
@@ -478,6 +478,25 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         paramss = [
             make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
         ]
+    elif study_name == 'main_coarse_3D_xdmf':
+        def make_params(vcov, mcov):
+            return ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'GA': 3, 'DZ': 1.5, 'NZ': 10,
+                'Ecov': 2.5e4, 'Ebod': 5e4,
+                'vcov': vcov,
+                'mcov': mcov,
+                'psub': 600*10,
+                'dt': 1e-4, 'tf': 0.5,
+                'ModifyEffect': ''
+            })
+
+        vcovs = [1.0, 1.1, 1.2, 1.3]
+        # vcovs = [1.0]
+        mcovs = [-0.8]
+        paramss = [
+            make_params(vcov, mcov) for vcov, mcov in it.product(vcovs, mcovs)
+        ]
     elif study_name == 'const_pregap':
         def make_params(elayers, vcov, mcov):
             return ExpParam({
@@ -579,6 +598,19 @@ def postprocess(
                 in_fpath, get_model, get_result_to_proc,
                 num_proc=num_proc, overwrite_results=overwrite_results
             )
+
+from femvf.vis import xdmfutils
+def postprocess_xdmf(
+        in_fpath: str, out_fpath: str,
+        overwrite: bool=False
+    ):
+    """
+    Write an XDMF file
+    """
+    model = get_model(in_fpath)
+    xdmfutils.export_vertex_values(model, in_fpath, out_fpath)
+    xdmf_name = f'{path.splitext(path.split(out_fpath)[-1])[0]}.xdmf'
+    xdmfutils.write_xdmf(model, out_fpath, xdmf_name)
 
 def get_result_to_proc(model: trabase.BaseTransientModel):
     """Return the mapping of results to post-processing functions"""
@@ -686,6 +718,7 @@ if __name__ == '__main__':
     parser.add_argument("--overwrite-results", type=str, action='extend', nargs='+')
     parser.add_argument("--default-dt", type=float, default=1.25e-5)
     parser.add_argument("--default-tf", type=float, default=0.5)
+    parser.add_argument("--export-xdmf", action='store_true', default=False)
     clargs = parser.parse_args()
 
     TF = clargs.default_tf
@@ -715,3 +748,11 @@ if __name__ == '__main__':
 
     out_fpath = f'{out_dir}/postprocess.h5'
     postprocess(out_fpath, in_fpaths, num_proc=clargs.num_proc)
+
+    if clargs.export_xdmf:
+        for in_fpath in in_fpaths:
+            out_fpath = f'{path.splitext(in_fpath)[0]}--vert.h5'
+            if not path.isfile(out_fpath):
+                postprocess_xdmf(in_fpath, out_fpath)
+            else:
+                print(f"Skipping XDMF export of existing file {out_fpath}")
