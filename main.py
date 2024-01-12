@@ -324,6 +324,7 @@ def solve_static_swollen_config(
     if isinstance(model, trabase.BaseTransientModel):
         static_state_n = model.state0.copy()
         static_state_n[:] = 0
+        model.dt = 1.0
     elif isinstance(model, dynbase.BaseDynamicalModel):
         static_state_n = model.state.copy()
         static_state_n[:] = 0
