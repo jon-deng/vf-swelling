@@ -475,12 +475,15 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'vcov': vcov,
                 'mcov': mcov,
                 'psub': 600*10,
-                'dt': 1e-4, 'tf': 0.5,
+                'dt': 5e-5, 'tf': 0.5,
                 'ModifyEffect': ''
             })
 
+        vcovs = np.array([1.0, 1.1, 1.2, 1.3])
+        mcovs = np.array([0.0, -0.8])
+
         paramss = [
-            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+            make_params(*args) for args in it.product(EMODS, vcovs, mcovs)
         ]
     elif study_name == 'main_coarse_3D_xdmf':
         def make_params(vcov, mcov):
@@ -572,6 +575,7 @@ def run(
     times = dt*np.arange(0, int(round(tf/dt))+1)
 
     out_path = f'{out_dir}/{params.to_str()}.h5'
+    breakpoint()
     if not path.isfile(out_path):
         with sf.StateFile(model, out_path, mode='a') as f:
             forward.integrate(
