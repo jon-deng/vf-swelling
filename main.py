@@ -575,7 +575,6 @@ def run(
     times = dt*np.arange(0, int(round(tf/dt))+1)
 
     out_path = f'{out_dir}/{params.to_str()}.h5'
-    breakpoint()
     if not path.isfile(out_path):
         with sf.StateFile(model, out_path, mode='a') as f:
             forward.integrate(
