@@ -2,6 +2,9 @@
 Run a sequence of vocal fold simulations with swelling
 """
 
+from typing import List, Tuple, Mapping, Optional
+from numpy.typing import NDArray
+
 from os import path
 import argparse as ap
 import multiprocessing as mp
@@ -14,7 +17,7 @@ import dolfin as dfn
 import h5py
 
 from femvf import forward, static, statefile as sf, meshutils
-from femvf.models.transient import solid, fluid, base as trabase
+from femvf.models.transient import solid, fluid, base as trabase, coupled
 from femvf.models.dynamical import base as dynbase
 from femvf.postprocess.base import TimeSeries, TimeSeriesStats
 from femvf.postprocess import solid as slsig
@@ -24,12 +27,14 @@ from blockarray import blockvec as bv
 
 from exputils import postprocutils, exputils
 
+from blockarray import blockvec as bv
+
 dfn.set_log_level(50)
 
 ## Defaults for 'nominal' parameter values
-MESH_BASE_NAME = 'M5_BC_GA3'
+MESH_BASE_NAME = 'M5_BC'
 
-CLSCALE = 1
+CLSCALE = 0.5
 
 POISSONS_RATIO = 0.4
 
@@ -43,6 +48,7 @@ EBOD = 5e4
 
 PARAM_SPEC = {
     'MeshName': str,
+    'GA': float,
     'DZ': float,
     'NZ': int,
     'clscale': float,
@@ -57,14 +63,23 @@ PARAM_SPEC = {
 }
 ExpParam = exputils.make_parameters(PARAM_SPEC)
 
-def setup_mesh_name(params):
+Model = coupled.BaseTransientFSIModel
+
+def setup_mesh_name(params: ExpParam) -> str:
+    """
+    Return the name of the mesh
+    """
     base_name = params['MeshName']
+    ga = params['GA']
     clscale = params['clscale']
     dz = params['DZ']
     nz = params['NZ']
-    return f'{base_name}--DZ{dz:.2f}--NZ{nz:d}--clscale{clscale:.2e}'
+    return f'{base_name}--GA{ga:.2f}--DZ{dz:.2f}--NZ{nz:d}--clscale{clscale:.2e}'
 
-def setup_model(params):
+def setup_model(params: ExpParam) -> Model:
+    """
+    Return the model
+    """
     mesh_path = f"mesh/{setup_mesh_name(params)}.msh"
 
     if params['DZ'] == 0.0:
@@ -82,7 +97,9 @@ def setup_model(params):
     )
     return model
 
-def setup_state_control_props(params, model):
+def setup_state_control_props(
+        params: ExpParam, model: Model
+    ) -> Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector]:
     """
     Return a (state, controls, prop) tuple defining a transient run
     """
@@ -97,12 +114,15 @@ def setup_state_control_props(params, model):
     state0 = setup_ini_state(params, model)
 
     # Set the glottal gap based on the post-swelling static configuration
+    ndim = model.solid.residual.mesh().topology().dim()
     if (params['ModifyEffect'] == 'const_pregap'
         or params['ModifyEffect'] == 'const_mass_pregap'
         ):
-        ymax = (model.solid.XREF + state0.sub['u'])[1::2].max()
+        # Using the `ndim` to space things ensures you get the y-coordinate
+        # for both 2D and 3D meshes
+        ymax = (model.solid.XREF + state0.sub['u'])[1::ndim].max()
     else:
-        ymax = (model.solid.XREF)[1::2].max()
+        ymax = (model.solid.XREF)[1::ndim].max()
     ygap = 0.03 # 0.3 mm half-gap -> 0.6 mm glottal gap
     ycoll_offset = 1/10*ygap
 
@@ -116,7 +136,7 @@ def setup_state_control_props(params, model):
     controls = setup_controls(params, model)
     return state0, controls, prop
 
-def setup_basic_props(params, model):
+def setup_basic_props(params: ExpParam, model: Model) -> bv.BlockVector:
     """
     Set the properties vector
     """
@@ -171,7 +191,7 @@ def setup_basic_props(params, model):
 
     return prop
 
-def setup_controls(params, model):
+def setup_controls(params: ExpParam, model: Model) -> bv.BlockVector:
     """
     Set the controls
     """
@@ -184,7 +204,7 @@ def setup_controls(params, model):
 
     return [control]
 
-def setup_ini_state(params, model):
+def setup_ini_state(params: ExpParam, model: Model) -> bv.BlockVector:
     """
     Set the initial state vector
     """
@@ -205,7 +225,13 @@ def setup_ini_state(params, model):
     state0[['u', 'v', 'a']] = static_state
     return state0
 
-def _set_swelling_props(prop, v, m, cellregion_to_sdof, modify_density=True, modify_geometry=True):
+def _set_swelling_props(
+        prop: bv.BlockVector,
+        v: float, m: float,
+        cellregion_to_sdof: Mapping[str, NDArray],
+        modify_density=True,
+        modify_geometry=True
+    ) -> bv.BlockVector:
     """
     Set properties related to the level of swelling
 
@@ -249,9 +275,9 @@ def _set_swelling_props(prop, v, m, cellregion_to_sdof, modify_density=True, mod
 
 def _set_layer_props(
         prop: bv.BlockVector,
-        emods: Mapping[str, int],
-        cellregion_to_sdof: Mapping[str, np.typing.NDArray]
-    ):
+        emods: Mapping[str, float],
+        cellregion_to_sdof: Mapping[str, NDArray]
+    ) -> bv.BlockVector:
     """
     Set properties for each layer of a model
 
@@ -288,7 +314,12 @@ def _set_layer_props(
     return prop
 
 
-def solve_static_swollen_config(model, control, prop, nload=1):
+def solve_static_swollen_config(
+        model: Model,
+        control: bv.BlockVector,
+        prop: bv.BlockVector,
+        nload: int=1
+    ):
     """
     Solve for the static swollen configuration
 
@@ -297,6 +328,7 @@ def solve_static_swollen_config(model, control, prop, nload=1):
     if isinstance(model, trabase.BaseTransientModel):
         static_state_n = model.state0.copy()
         static_state_n[:] = 0
+        model.dt = 1.0
     elif isinstance(model, dynbase.BaseDynamicalModel):
         static_state_n = model.state.copy()
         static_state_n[:] = 0
@@ -318,15 +350,16 @@ def solve_static_swollen_config(model, control, prop, nload=1):
     return static_state_n, info
 
 
-def make_exp_params(study_name):
+def make_exp_params(study_name: str) -> List[ExpParam]:
     if study_name == 'none':
         paramss = []
     elif study_name == 'test':
-        vcovs = [1.0, 1.3]
+        vcovs = [1.0, 1.1, 1.2, 1.3]
         vcovs = [1.0]
         paramss = [
             ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': 0.5,
+                'GA': 3,
                 'DZ': 1.50, 'NZ': 10,
                 'Ecov': ECOV, 'Ebod': EBOD,
                 'vcov': vcov,
@@ -336,6 +369,22 @@ def make_exp_params(study_name):
                 'ModifyEffect': ''
             })
             for vcov in vcovs
+        ]
+    elif study_name == 'test_3d_onset':
+        psubs = 10*np.arange(300, 1001, 100)
+        paramss = [
+            ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': 0.5,
+                'GA': 3,
+                'DZ': 1.50, 'NZ': 10,
+                'Ecov': ECOV, 'Ebod': EBOD,
+                'vcov': 1.0,
+                'mcov': -0.8,
+                'psub': psub,
+                'dt': 1.25e-5, 'tf': 0.0125,
+                'ModifyEffect': ''
+            })
+            for psub in psubs
         ]
     elif study_name == 'debug_time_psub':
         vcovs = [1.0, 1.3]
@@ -374,6 +423,7 @@ def make_exp_params(study_name):
         def make_params(elayers, vcov, mcov):
             return ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'GA': 3, 'DZ': 0.00, 'NZ': 1,
                 'Ecov': elayers['cover'], 'Ebod': elayers['body'],
                 'vcov': vcov,
                 'mcov': mcov,
@@ -385,20 +435,78 @@ def make_exp_params(study_name):
         paramss = [
             make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
         ]
-    elif study_name == 'main_coarse':
+    elif study_name == 'main_3D':
         def make_params(elayers, vcov, mcov):
             return ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
                 'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'GA': 3, 'DZ': 1.5, 'NZ': 10,
                 'vcov': vcov,
                 'mcov': mcov,
-                'psub': PSUB,
-                'dt': 2e-4, 'tf': 0.5,
+                'psub': 600*10,
+                'dt': DT, 'tf': TF,
                 'ModifyEffect': ''
             })
 
         paramss = [
             make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+        ]
+    elif study_name == 'main_coarse':
+        def make_params(elayers, vcov, mcov):
+            return ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'GA': 3, 'DZ': 0.00, 'NZ': 1,
+                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'vcov': vcov,
+                'mcov': mcov,
+                'psub': PSUB,
+                'dt': 1e-4, 'tf': 0.5,
+                'ModifyEffect': ''
+            })
+
+        vcovs = np.array([1.0, 1.1, 1.2, 1.3])
+        mcovs = np.array([0.0, -0.8])
+
+        paramss = [
+            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+        ]
+    elif study_name == 'main_coarse_3D':
+        def make_params(elayers, vcov, mcov):
+            return ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'GA': 3, 'DZ': 1.5, 'NZ': 10,
+                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'vcov': vcov,
+                'mcov': mcov,
+                'psub': 600*10,
+                'dt': 5e-5, 'tf': 0.5,
+                'ModifyEffect': ''
+            })
+
+        vcovs = np.array([1.0, 1.1, 1.2, 1.3])
+        mcovs = np.array([0.0, -0.8])
+
+        paramss = [
+            make_params(*args) for args in it.product(EMODS, vcovs, mcovs)
+        ]
+    elif study_name == 'main_coarse_3D_xdmf':
+        def make_params(vcov, mcov):
+            return ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'GA': 3, 'DZ': 1.5, 'NZ': 10,
+                'Ecov': 2.5e4, 'Ebod': 5e4,
+                'vcov': vcov,
+                'mcov': mcov,
+                'psub': 600*10,
+                'dt': 1e-4, 'tf': 0.5,
+                'ModifyEffect': ''
+            })
+
+        vcovs = [1.0, 1.1, 1.2, 1.3]
+        # vcovs = [1.0]
+        mcovs = [-0.8]
+        paramss = [
+            make_params(vcov, mcov) for vcov, mcov in it.product(vcovs, mcovs)
         ]
     elif study_name == 'const_pregap':
         def make_params(elayers, vcov, mcov):
@@ -483,7 +591,8 @@ def run(
 
 def postprocess(
         out_fpath: str, in_fpaths: List[str],
-        overwrite_results=None, num_proc=1
+        overwrite_results: Optional[List[str]]=None,
+        num_proc: int=1
     ):
     """
     Postprocess key signals from the simulations
@@ -500,6 +609,19 @@ def postprocess(
                 in_fpath, get_model, get_result_to_proc,
                 num_proc=num_proc, overwrite_results=overwrite_results
             )
+
+from femvf.vis import xdmfutils
+def postprocess_xdmf(
+        in_fpath: str, out_fpath: str,
+        overwrite: bool=False
+    ):
+    """
+    Write an XDMF file
+    """
+    model = get_model(in_fpath)
+    xdmfutils.export_vertex_values(model, in_fpath, out_fpath)
+    xdmf_name = f'{path.splitext(path.split(out_fpath)[-1])[0]}.xdmf'
+    xdmfutils.write_xdmf(model, out_fpath, xdmf_name)
 
 def get_result_to_proc(model: trabase.BaseTransientModel):
     """Return the mapping of results to post-processing functions"""
@@ -593,7 +715,7 @@ def get_result_to_proc(model: trabase.BaseTransientModel):
     }
     return signal_to_proc
 
-def get_model(in_fpath):
+def get_model(in_fpath: str) -> Model:
     """Return the model"""
     in_fname = path.splitext(path.split(in_fpath)[-1])[0]
     params = ExpParam(in_fname)
@@ -607,6 +729,7 @@ if __name__ == '__main__':
     parser.add_argument("--overwrite-results", type=str, action='extend', nargs='+')
     parser.add_argument("--default-dt", type=float, default=1.25e-5)
     parser.add_argument("--default-tf", type=float, default=0.5)
+    parser.add_argument("--export-xdmf", action='store_true', default=False)
     clargs = parser.parse_args()
 
     TF = clargs.default_tf
@@ -636,3 +759,11 @@ if __name__ == '__main__':
 
     out_fpath = f'{out_dir}/postprocess.h5'
     postprocess(out_fpath, in_fpaths, num_proc=clargs.num_proc)
+
+    if clargs.export_xdmf:
+        for in_fpath in in_fpaths:
+            out_fpath = f'{path.splitext(in_fpath)[0]}--vert.h5'
+            if not path.isfile(out_fpath):
+                postprocess_xdmf(in_fpath, out_fpath)
+            else:
+                print(f"Skipping XDMF export of existing file {out_fpath}")
