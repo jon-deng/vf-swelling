@@ -7,7 +7,7 @@ import argparse as ap
 import multiprocessing as mp
 import itertools as it
 import functools
-from typing import List
+from typing import List, Mapping
 
 import numpy as np
 import dolfin as dfn
@@ -19,6 +19,9 @@ from femvf.models.dynamical import base as dynbase
 from femvf.postprocess.base import TimeSeries, TimeSeriesStats
 from femvf.postprocess import solid as slsig
 from femvf.load import load_transient_fsi_model
+
+from blockarray import blockvec as bv
+
 from exputils import postprocutils, exputils
 
 dfn.set_log_level(50)
@@ -244,7 +247,11 @@ def _set_swelling_props(prop, v, m, cellregion_to_sdof, modify_density=True, mod
 
     return prop
 
-def _set_layer_props(prop, emods, cellregion_to_sdof):
+def _set_layer_props(
+        prop: bv.BlockVector,
+        emods: Mapping[str, int],
+        cellregion_to_sdof: Mapping[str, np.typing.NDArray]
+    ):
     """
     Set properties for each layer of a model
 
@@ -323,9 +330,9 @@ def make_exp_params(study_name):
                 'DZ': 1.50, 'NZ': 10,
                 'Ecov': ECOV, 'Ebod': EBOD,
                 'vcov': vcov,
-                'mcov': -0.8,
+                'mcov': 0.0,
                 'psub': 300*10,
-                'dt': 1.25e-5, 'tf': 0.001,
+                'dt': 1.25e-5, 'tf': 0.1,
                 'ModifyEffect': ''
             })
             for vcov in vcovs
