@@ -66,27 +66,27 @@ ExpParam = exputils.make_parameters(PARAM_SPEC)
 
 Model = coupled.BaseTransientFSIModel
 
-def setup_mesh_name(params: ExpParam) -> str:
+def setup_mesh_name(param: ExpParam) -> str:
     """
     Return the name of the mesh
     """
-    base_name = params['MeshName']
-    ga = params['GA']
-    clscale = params['clscale']
-    dz = params['DZ']
-    nz = params['NZ']
+    base_name = param['MeshName']
+    ga = param['GA']
+    clscale = param['clscale']
+    dz = param['DZ']
+    nz = param['NZ']
     return f'{base_name}--GA{ga:.2f}--DZ{dz:.2f}--NZ{nz:d}--clscale{clscale:.2e}'
 
-def setup_model(params: ExpParam) -> Model:
+def setup_model(param: ExpParam) -> Model:
     """
     Return the model
     """
-    mesh_path = f"mesh/{setup_mesh_name(params)}.msh"
+    mesh_path = f"mesh/{setup_mesh_name(param)}.msh"
 
-    if params['DZ'] == 0.0:
+    if param['DZ'] == 0.0:
         zs = None
-    elif params['DZ'] > 0.0:
-        zs = np.linspace(0, params['DZ'], params['NZ']+1)
+    elif param['DZ'] > 0.0:
+        zs = np.linspace(0, param['DZ'], param['NZ']+1)
     else:
         raise ValueError("Parameter 'DZ' must be >= 0")
 
@@ -137,7 +137,7 @@ def setup_state_control_props(
     controls = setup_controls(params, model)
     return state0, controls, prop
 
-def setup_basic_props(params: ExpParam, model: Model) -> bv.BlockVector:
+def setup_basic_props(param: ExpParam, model: Model) -> bv.BlockVector:
     """
     Set the properties vector
     """
@@ -165,34 +165,34 @@ def setup_basic_props(params: ExpParam, model: Model) -> bv.BlockVector:
 
     ## Swelling specific properties
     if (
-            params['ModifyEffect'] == 'const_pregap'
-            or params['ModifyEffect'] == ''
+            param['ModifyEffect'] == 'const_pregap'
+            or param['ModifyEffect'] == ''
         ):
         # This one is controlled in the initial state
         modify_kwargs = {}
     elif (
-            params['ModifyEffect'] == 'const_mass'
-            or params['ModifyEffect'] == 'const_mass_pregap'
+            param['ModifyEffect'] == 'const_mass'
+            or param['ModifyEffect'] == 'const_mass_pregap'
         ):
         modify_kwargs = {'modify_density': False}
     else:
-        raise ValueError(f"Unkown 'ModifyEffect' parameter {params['ModifyEffect']}")
+        raise ValueError(f"Unkown 'ModifyEffect' parameter {param['ModifyEffect']}")
 
     prop = _set_swelling_props(
-        params, model, prop, cellregion_to_sdof,
+        param, model, prop, cellregion_to_sdof,
         **modify_kwargs
     )
 
     ## Set VF layer properties
     emods = {
-        'cover': params['Ecov'],
-        'body': params['Ebod']
+        'cover': param['Ecov'],
+        'body': param['Ebod']
     }
     prop = _set_layer_props(prop, emods, cellregion_to_sdof)
 
     return prop
 
-def setup_controls(params: ExpParam, model: Model) -> bv.BlockVector:
+def setup_controls(param: ExpParam, model: Model) -> bv.BlockVector:
     """
     Set the controls
     """
@@ -200,12 +200,12 @@ def setup_controls(params: ExpParam, model: Model) -> bv.BlockVector:
     control[:] = 0
 
     for n in range(len(model.fluids)):
-        control[f'fluid{n}.psub'] = params['psub']
+        control[f'fluid{n}.psub'] = param['psub']
         control[f'fluid{n}.psup'] = 0.0
 
     return [control]
 
-def setup_ini_state(params: ExpParam, model: Model) -> bv.BlockVector:
+def setup_ini_state(param: ExpParam, model: Model) -> bv.BlockVector:
     """
     Set the initial state vector
     """
@@ -213,10 +213,10 @@ def setup_ini_state(params: ExpParam, model: Model) -> bv.BlockVector:
     state0[:] = 0.0
     model.solid.control[:] = 0.0
 
-    vcov = params['vcov']
+    vcov = param['vcov']
     nload = max(int(round((vcov-1)/0.025)), 1)
 
-    prop = setup_basic_props(params, model)
+    prop = setup_basic_props(param, model)
     model.set_prop(prop)
 
     static_state, _ = solve_static_swollen_config(
@@ -402,11 +402,11 @@ def solve_static_swollen_config(
 
 def make_exp_params(study_name: str) -> List[ExpParam]:
     if study_name == 'none':
-        paramss = []
+        params = []
     elif study_name == 'test':
         vcovs = [1.0, 1.1, 1.2, 1.3]
         vcovs = [1.0, 1.2]
-        paramss = [
+        params = [
             ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': 0.5,
                 'GA': 3,
@@ -423,7 +423,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         ]
     elif study_name == 'test_3d_onset':
         psubs = 10*np.arange(300, 1001, 100)
-        paramss = [
+        params = [
             ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': 0.5,
                 'GA': 3,
@@ -440,7 +440,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
     elif study_name == 'debug_time_psub':
         vcovs = [1.0, 1.3]
         fdts = [1, 2, 4, 8]
-        paramss = [
+        params = [
             ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': 1,
                 'Ecov': ECOV, 'Ebod': EBOD,
@@ -467,7 +467,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
 
         clscales = 1 * 2.0**np.arange(1, -2, -1)
         dts = 5e-5 * 2.0**np.arange(0, -5, -1)
-        paramss = [
+        params = [
             make_params(clscale, dt) for clscale in clscales for dt in dts
         ]
     elif study_name == 'main':
@@ -483,7 +483,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'ModifyEffect': ''
             })
 
-        paramss = [
+        params = [
             make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
         ]
     elif study_name == 'main_3D':
@@ -499,7 +499,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'ModifyEffect': ''
             })
 
-        paramss = [
+        params = [
             make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
         ]
     elif study_name == 'main_coarse':
@@ -518,7 +518,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         vcovs = np.array([1.0, 1.1, 1.2, 1.3])
         mcovs = np.array([0.0, -0.8])
 
-        paramss = [
+        params = [
             make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
         ]
     elif study_name == 'main_3D_unswollen_setup':
@@ -539,7 +539,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         vcovs = np.array([1.0])
         mcovs = np.array([0.0])
 
-        paramss = [
+        params = [
             make_params(*args) for args in it.product(EMODS, vcovs, mcovs)
         ]
     elif study_name == 'main_3D_locally_swollen':
@@ -559,7 +559,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         vcovs = np.array([1.15])
         mcovs = np.array([0.0])
 
-        paramss = [
+        params = [
             make_params(*args) for args in it.product(EMODS, vcovs, mcovs)
         ]
     elif study_name == 'main_coarse_3D':
@@ -578,7 +578,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         vcovs = np.array([1.0, 1.1, 1.2, 1.3])
         mcovs = np.array([0.0, -0.8])
 
-        paramss = [
+        params = [
             make_params(*args) for args in it.product(EMODS, vcovs, mcovs)
         ]
     elif study_name == 'main_coarse_3D_xdmf':
@@ -597,7 +597,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         vcovs = [1.0, 1.1, 1.2, 1.3]
         # vcovs = [1.0]
         mcovs = [-0.8]
-        paramss = [
+        params = [
             make_params(vcov, mcov) for vcov, mcov in it.product(vcovs, mcovs)
         ]
     elif study_name == 'const_pregap':
@@ -612,7 +612,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'ModifyEffect': 'const_pregap'
             })
 
-        paramss = [
+        params = [
             make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
         ]
     elif study_name == 'const_mass':
@@ -627,7 +627,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'ModifyEffect': 'const_mass'
             })
 
-        paramss = [
+        params = [
             make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
         ]
     elif study_name == 'const_mass_pregap':
@@ -642,13 +642,13 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'ModifyEffect': 'const_mass_pregap'
             })
 
-        paramss = [
+        params = [
             make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
         ]
     else:
         raise ValueError(f"Unknown `--study-name` {study_name}")
 
-    return paramss
+    return params
 
 
 ## Main functions for running/postprocessing simulations
@@ -849,7 +849,9 @@ if __name__ == '__main__':
     TF = clargs.default_tf
     DT = clargs.default_dt
 
-    postprocess = functools.partial(postprocess, overwrite_results=clargs.overwrite_results)
+    postprocess = functools.partial(
+        postprocess, overwrite_results=clargs.overwrite_results
+    )
 
     # Pack up the emod arguments to a dict format
     _emods = np.array([[2.5, 5.0]]) * 1e3 * 10
@@ -861,21 +863,21 @@ if __name__ == '__main__':
 
     ## Run and postprocess simulations
     out_dir = clargs.output_dir
-    paramss = make_exp_params(clargs.study_name)
-    paramss_dict = [params.data for params in paramss]
+    params = make_exp_params(clargs.study_name)
+    param_dicts = [param.data for param in params]
     if clargs.num_proc > 1:
         _run = functools.partial(run, out_dir=out_dir)
         with mp.Pool(processes=clargs.num_proc) as pool:
             print(f"Pool running with {clargs.num_proc:d} processors")
-            in_fpaths = pool.map(_run, paramss_dict, chunksize=1)
+            in_fpaths = pool.map(_run, param_dicts, chunksize=1)
     else:
-        in_fpaths = [run(params, out_dir) for params in paramss_dict]
+        in_fpaths = [run(params, out_dir) for params in param_dicts]
 
     out_fpath = f'{out_dir}/postprocess.h5'
     postprocess(out_fpath, in_fpaths, num_proc=clargs.num_proc)
 
     if clargs.export_xdmf:
-        for param in paramss:
+        for param in params:
             in_fpath = f'{out_dir}/{param.to_str()}.h5'
             out_fpath = f'{path.splitext(in_fpath)[0]}--vert.h5'
 
@@ -883,6 +885,9 @@ if __name__ == '__main__':
                 model = setup_model(param)
                 with sf.StateFile(model, in_fpath) as state_file:
                     with h5py.File(f'{out_dir}/postprocess.h5') as post_file:
-                        postprocess_xdmf(model, state_file, post_file[param.to_str()], out_fpath)
+                        postprocess_xdmf(
+                            model, state_file, post_file[param.to_str()],
+                            out_fpath
+                        )
             else:
                 print(f"Skipping XDMF export of existing file {out_fpath}")
