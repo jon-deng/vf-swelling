@@ -704,16 +704,74 @@ def postprocess(
 
 from femvf.vis import xdmfutils
 def postprocess_xdmf(
-        model, state_file: sf.StateFile, post_file: h5py.File, out_fpath: str,
+        model, param: ExpParam, out_fpath: str,
         overwrite: bool=False
     ):
     """
     Write an XDMF file
     """
-    # model = get_model(in_fpath)
-    xdmfutils.export_vertex_values(model, state_file, post_file, out_fpath)
-    xdmf_name = f'{path.splitext(path.split(out_fpath)[-1])[0]}.xdmf'
-    xdmfutils.write_xdmf(model, out_fpath, xdmf_name)
+    with (
+            h5py.File(f'out/{param.to_str()}.h5') as fstate,
+            h5py.File(f'out/postprocess.h5', mode='r') as fpost,
+            h5py.File(out_fpath, mode='w') as fxdmf
+        ):
+        # Export mesh values
+        _labels = ['mesh/solid', 'time']
+        labels = _labels
+        datasets = [
+            fstate[label] for label in _labels
+        ]
+        formats = [None, None]
+
+        mesh = model.solid.residual.mesh()
+        function_space = dfn.VectorFunctionSpace(mesh, 'CG', 1)
+        _labels = ['state/u', 'state/v', 'state/a']
+        labels += _labels
+        datasets += [fstate[label] for label in _labels]
+        formats += len(_labels)*[function_space]
+
+        function_space = dfn.FunctionSpace(mesh, 'CG', 1)
+        _labels = ['time.field.p']
+        labels += _labels
+        datasets += [fpost[f'{param.to_str()}/{label}'] for label in _labels]
+        formats += len(_labels)*[function_space]
+
+        function_space = dfn.FunctionSpace(mesh, 'DG', 0)
+        _labels = ['field.tavg_viscous_rate', 'field.tavg_strain_energy']
+        labels += _labels
+        datasets += [fpost[f'{param.to_str()}/{label}'] for label in _labels]
+        formats += len(_labels)*[function_space]
+        xdmfutils.export_mesh_values(
+            datasets, formats, fxdmf, output_names=labels
+        )
+
+        # Annotate the mesh values with an XDMF file
+        static_dataset_descrs = [
+            (fxdmf['state/u'], 'vector', 'node'),
+            (fxdmf['field.tavg_viscous_rate'], 'scalar', 'center'),
+            (fxdmf['field.tavg_strain_energy'], 'scalar', 'center'),
+        ]
+        static_idxs = [
+            (0, ...), (), ()
+        ]
+        temporal_dataset_descrs = [
+            (fxdmf['state/u'], 'vector', 'node'),
+            (fxdmf['state/v'], 'vector', 'node'),
+            (fxdmf['state/a'], 'vector', 'node'),
+            (fxdmf['time.field.p'], 'scalar', 'node'),
+        ]
+        temporal_idxs = len(temporal_dataset_descrs)*[
+            (slice(None),)
+        ]
+
+        xdmf_name = f'{path.splitext(path.split(out_fpath)[-1])[0]}.xdmf'
+        xdmfutils.write_xdmf(
+            fxdmf['mesh/solid'],
+            static_dataset_descrs, static_idxs,
+            fxdmf['time'],
+            temporal_dataset_descrs, temporal_idxs,
+            xdmf_name
+        )
 
 def get_result_name_to_postprocess(
         model: trabase.BaseTransientModel
@@ -807,6 +865,7 @@ def get_result_name_to_postprocess(
         'time.q': proc_q,
         'time.gw': TimeSeries(proc_gw),
         'time.t': proc_time,
+        'time.field.p': TimeSeries(slsig.FSIPressure(model)),
 
         'time.savg_viscous_rate': TimeSeries(proc_visc_rate),
 
@@ -881,13 +940,10 @@ if __name__ == '__main__':
             in_fpath = f'{out_dir}/{param.to_str()}.h5'
             out_fpath = f'{path.splitext(in_fpath)[0]}--vert.h5'
 
-            if not path.isfile(out_fpath):
-                model = setup_model(param)
-                with sf.StateFile(model, in_fpath) as state_file:
-                    with h5py.File(f'{out_dir}/postprocess.h5') as post_file:
-                        postprocess_xdmf(
-                            model, state_file, post_file[param.to_str()],
-                            out_fpath
-                        )
-            else:
-                print(f"Skipping XDMF export of existing file {out_fpath}")
+            model = setup_model(param)
+            postprocess_xdmf(
+                model, param, out_fpath
+            )
+            # if not path.isfile(out_fpath):
+            # else:
+            #     print(f"Skipping XDMF export of existing file {out_fpath}")
