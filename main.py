@@ -2,7 +2,7 @@
 Run a sequence of vocal fold simulations with swelling
 """
 
-from typing import List, Tuple, Mapping, Optional
+from typing import List, Tuple, Mapping, Optional, Callable
 from numpy.typing import NDArray
 
 from os import path
@@ -59,7 +59,8 @@ PARAM_SPEC = {
     'psub': float,
     'dt': float,
     'tf': float,
-    'ModifyEffect': str
+    'ModifyEffect': str,
+    'SwellingDistribution': str
 }
 ExpParam = exputils.make_parameters(PARAM_SPEC)
 
@@ -178,7 +179,7 @@ def setup_basic_props(params: ExpParam, model: Model) -> bv.BlockVector:
         raise ValueError(f"Unkown 'ModifyEffect' parameter {params['ModifyEffect']}")
 
     prop = _set_swelling_props(
-        prop, params['vcov'], params['mcov'], cellregion_to_sdof,
+        model, prop, params['vcov'], params['mcov'], cellregion_to_sdof,
         **modify_kwargs
     )
 
@@ -226,11 +227,14 @@ def setup_ini_state(params: ExpParam, model: Model) -> bv.BlockVector:
     return state0
 
 def _set_swelling_props(
+        param: ExpParam,
+        model: Model,
         prop: bv.BlockVector,
         v: float, m: float,
         cellregion_to_sdof: Mapping[str, NDArray],
         modify_density=True,
-        modify_geometry=True
+        modify_geometry=True,
+        out_dir='out'
     ) -> bv.BlockVector:
     """
     Set properties related to the level of swelling
@@ -267,9 +271,51 @@ def _set_swelling_props(
         prop['v_swelling'][dofs_bod] = 1.0
 
     prop['rho'][:] = RHO_VF
+
     if modify_density:
         _v = np.array(prop['v_swelling'][:])
         prop['rho'][:] = RHO_VF + (_v-1)*RHO_SWELL
+
+    ## TODO : Fix this ad-hoc thing to do the swelling based on damage
+    if param['SwellingDistribution'] != 'uniform':
+        param_unswollen = param.substitute({
+            'vcov': 1.0
+        })
+        with h5py.File(f'out/postprocess.h5', mode='r+') as f:
+            # damage_key = 'field.tavg_viscous_rate'
+            damage_key = param['SwellingDistribution']
+            group_name = param_unswollen.to_str()
+            dataset_name = f'{group_name}/{damage_key}'
+            # Check if the post-processed damage measure exists;
+            # if not, post-process the damage measure.
+            if dataset_name not in f:
+                state_fpath = path.join(out_dir, f'{group_name}.h5')
+                # If the simulation hasn't been run, then run it first
+                if not path.isfile(state_fpath):
+                    run(param_unswollen, out_dir)
+
+                with sf.StateFile(model, state_fpath, mode='r') as fstate:
+                    postprocess = get_result_name_to_postprocess(model)[damage_key]
+                    group = f.require_group(group_name)
+                    group.create_dataset(damage_key, data=postprocess(fstate))
+            _damage = f[dataset_name][:]
+
+        residual = model.solid.residual
+        damage = residual.form['coeff.prop.v_swelling'].copy()
+        damage.vector()[:] = _damage
+        v_swell = damage.copy()
+
+        cell_label_to_id = residual.mesh_function_label_to_value('cell')
+        dx = residual.measure('dx')
+        dx_cover = dx(int(cell_label_to_id['cover']))
+
+        vol_cov = dfn.assemble(1*dx_cover)
+        v_factor = (v*vol_cov - vol_cov)/dfn.assemble(damage*dx_cover)
+        v_swell.vector()[:] = (1+v_factor*damage.vector()[:])
+        # print(dfn.assemble(v_swell*dx_cover)/dfn.assemble(1*dx_cover))
+        prop['v_swelling'][:] = v_swell.vector()[:]
+        prop['v_swelling'][dofs_bod] = 1.0
+        breakpoint()
 
     return prop
 
@@ -364,8 +410,8 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'Ecov': ECOV, 'Ebod': EBOD,
                 'vcov': vcov,
                 'mcov': 0.0,
-                'psub': 300*10,
-                'dt': 1.25e-5, 'tf': 0.1,
+                'psub': 500*10,
+                'dt': 5e-5, 'tf': 5e-5*10,
                 'ModifyEffect': ''
             })
             for vcov in vcovs
@@ -469,6 +515,47 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
 
         paramss = [
             make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+        ]
+    elif study_name == 'main_3D_unswollen_setup':
+        # This case is the setup for the unswollen 3D state
+        def make_params(elayers, vcov, mcov):
+            return ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'GA': 3, 'DZ': 1.5, 'NZ': 10,
+                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'vcov': vcov,
+                'mcov': mcov,
+                'psub': 600*10,
+                'dt': 5e-5, 'tf': 0.5,
+                'ModifyEffect': ''
+            })
+
+        vcovs = np.array([1.0, 1.3])
+        vcovs = np.array([1.0])
+        mcovs = np.array([0.0])
+
+        paramss = [
+            make_params(*args) for args in it.product(EMODS, vcovs, mcovs)
+        ]
+    elif study_name == 'main_3D_locally_swollen':
+        # This case is the setup for the unswollen 3D state
+        def make_params(elayers, vcov, mcov):
+            return ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'GA': 3, 'DZ': 1.5, 'NZ': 10,
+                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'vcov': vcov,
+                'mcov': mcov,
+                'psub': 600*10,
+                'dt': 5e-5, 'tf': 0.5,
+                'ModifyEffect': '',
+            })
+
+        vcovs = np.array([1.15])
+        mcovs = np.array([0.0])
+
+        paramss = [
+            make_params(*args) for args in it.product(EMODS, vcovs, mcovs)
         ]
     elif study_name == 'main_coarse_3D':
         def make_params(elayers, vcov, mcov):
@@ -606,25 +693,40 @@ def postprocess(
             print(case_name)
             postprocutils.postprocess_parallel(
                 f.require_group(case_name),
-                in_fpath, get_model, get_result_to_proc,
+                in_fpath, get_model, get_result_name_to_postprocess,
                 num_proc=num_proc, overwrite_results=overwrite_results
             )
 
 from femvf.vis import xdmfutils
 def postprocess_xdmf(
-        in_fpath: str, out_fpath: str,
+        model, state_file: sf.StateFile, post_file: h5py.File, out_fpath: str,
         overwrite: bool=False
     ):
     """
     Write an XDMF file
     """
-    model = get_model(in_fpath)
-    xdmfutils.export_vertex_values(model, in_fpath, out_fpath)
+    # model = get_model(in_fpath)
+    xdmfutils.export_vertex_values(model, state_file, post_file, out_fpath)
     xdmf_name = f'{path.splitext(path.split(out_fpath)[-1])[0]}.xdmf'
     xdmfutils.write_xdmf(model, out_fpath, xdmf_name)
 
-def get_result_to_proc(model: trabase.BaseTransientModel):
-    """Return the mapping of results to post-processing functions"""
+def get_result_name_to_postprocess(
+        model: trabase.BaseTransientModel
+    ) -> Mapping[str, Callable[[sf.StateFile], np.ndarray]]:
+    """
+    Return a mapping of result names to post-processing functions
+
+    Returns
+    -------
+    Mapping[str, Callable]
+        A mapping from post-processed result names to functions
+
+        The post-processed result names have a format where each axis of the
+        data is given a name separated by dots. For example, the name
+        'time.vertex.u' could indicate a 2-axis array of 'u' displacements where
+        the first axis represents time while the second axis represents
+        different vertices.
+    """
     proc_gw = slsig.MeanGlottalWidth(model)
 
     cell_label_to_id = model.solid.residual.mesh_function_label_to_value('cell')
@@ -641,10 +743,15 @@ def get_result_to_proc(model: trabase.BaseTransientModel):
     proc_visc_rate = slsig.ViscousDissipationRate(model, dx=dx_cover)
 
     ## Project field variables onto a DG0 space
-    fspace_dg0 = model.solid.residual.form['coeff.fsi.p1'].function_space()
+    # fspace_dg0 = model.solid.residual.form['coeff.fsi.p1'].function_space()
+    fspace_dg0 = model.solid.residual.form['coeff.prop.eta'].function_space()
     proc_hydro_field = slsig.StressHydrostaticField(model)
     proc_vm_field = slsig.StressVonMisesField(model)
     proc_visc_diss_rate_field = slsig.ViscousDissipationField(
+        model, dx=dx, fspace=fspace_dg0
+    )
+
+    proc_strain_energy = slsig.StrainEnergy(
         model, dx=dx, fspace=fspace_dg0
     )
 
@@ -691,29 +798,31 @@ def get_result_to_proc(model: trabase.BaseTransientModel):
         ]
         return np.array(qs)
 
-    signal_to_proc = {
-        'q': proc_q,
-        'gw': TimeSeries(proc_gw),
-        'time': proc_time,
+    result_name_to_postprocess = {
+        'time.q': proc_q,
+        'time.gw': TimeSeries(proc_gw),
+        'time.t': proc_time,
 
-        'signal_savg_viscous_rate': TimeSeries(proc_visc_rate),
+        'time.savg_viscous_rate': TimeSeries(proc_visc_rate),
 
-        'field_tavg_viscous_rate': lambda f: TimeSeriesStats(proc_visc_diss_rate_field).mean(f, range(f.size//2, f.size)),
-        'field_tavg_vm': lambda f: TimeSeriesStats(proc_vm_field).mean(f, range(f.size//2, f.size)),
-        'field_tavg_hydrostatic': lambda f: TimeSeriesStats(proc_hydro_field).mean(f, range(f.size//2, f.size)),
-        'field_tavg_pc': lambda f: TimeSeriesStats(proc_contact_pressure_field).mean(f, range(f.size//2, f.size)),
-        'field_tini_hydrostatic': lambda f: proc_hydro_field(f.get_state(0), f.get_control(0), f.get_prop()),
-        'field_tini_vm': lambda f: proc_vm_field(f.get_state(0), f.get_control(0), f.get_prop()),
+        'field.tavg_viscous_rate': lambda f: TimeSeriesStats(proc_visc_diss_rate_field).mean(f, range(f.size//2, f.size)),
+        'field.tavg_vm': lambda f: TimeSeriesStats(proc_vm_field).mean(f, range(f.size//2, f.size)),
+        'field.tavg_hydrostatic': lambda f: TimeSeriesStats(proc_hydro_field).mean(f, range(f.size//2, f.size)),
+        'field.tavg_pc': lambda f: TimeSeriesStats(proc_contact_pressure_field).mean(f, range(f.size//2, f.size)),
+        'field.tavg_strain_energy': lambda f: TimeSeriesStats(proc_strain_energy).mean(f, range(f.size//2, f.size)),
+        'field.tini_hydrostatic': lambda f: proc_hydro_field(f.get_state(0), f.get_control(0), f.get_prop()),
+        'field.tini_vm': lambda f: proc_vm_field(f.get_state(0), f.get_control(0), f.get_prop()),
+        'field.vswell': lambda f: f.get_prop()['v_swelling'],
 
-        'signal_spatial_stats_con_p': TimeSeries(make_cpressure_field_stats()),
-        'signal_spatial_stats_con_a': TimeSeries(make_carea_field_stats()),
-        'signal_spatial_stats_viscous': TimeSeries(make_wvisc_field_stats(dx_cover)),
-        # 'signal_spatial_stats_viscous_medial': TimeSeries(make_wvisc_field_stats(dx_medial)),
-        'signal_spatial_stats_vm': TimeSeries(make_svm_field_stats(dx_cover)),
-        # 'signal_spatial_stats_vm_medial': TimeSeries(make_svm_field_stats(dx_medial)),
-        'signal_spatial_state_ymom': TimeSeries(make_ymom_field_stats())
+        'time.spatial_stats_con_p': TimeSeries(make_cpressure_field_stats()),
+        'time.spatial_stats_con_a': TimeSeries(make_carea_field_stats()),
+        'time.spatial_stats_viscous': TimeSeries(make_wvisc_field_stats(dx_cover)),
+        # 'time.spatial_stats_viscous_medial': TimeSeries(make_wvisc_field_stats(dx_medial)),
+        'time.spatial_stats_vm': TimeSeries(make_svm_field_stats(dx_cover)),
+        # 'time.spatial_stats_vm_medial': TimeSeries(make_svm_field_stats(dx_medial)),
+        'time.spatial_state_ymom': TimeSeries(make_ymom_field_stats())
     }
-    return signal_to_proc
+    return result_name_to_postprocess
 
 def get_model(in_fpath: str) -> Model:
     """Return the model"""
@@ -761,9 +870,14 @@ if __name__ == '__main__':
     postprocess(out_fpath, in_fpaths, num_proc=clargs.num_proc)
 
     if clargs.export_xdmf:
-        for in_fpath in in_fpaths:
+        for param in paramss:
+            in_fpath = f'{out_dir}/{param.to_str()}.h5'
             out_fpath = f'{path.splitext(in_fpath)[0]}--vert.h5'
+
             if not path.isfile(out_fpath):
-                postprocess_xdmf(in_fpath, out_fpath)
+                model = setup_model(param)
+                with sf.StateFile(model, in_fpath) as state_file:
+                    with h5py.File(f'{out_dir}/postprocess.h5') as post_file:
+                        postprocess_xdmf(model, state_file, post_file[param.to_str()], out_fpath)
             else:
                 print(f"Skipping XDMF export of existing file {out_fpath}")
