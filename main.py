@@ -179,7 +179,7 @@ def setup_basic_props(params: ExpParam, model: Model) -> bv.BlockVector:
         raise ValueError(f"Unkown 'ModifyEffect' parameter {params['ModifyEffect']}")
 
     prop = _set_swelling_props(
-        model, prop, params['vcov'], params['mcov'], cellregion_to_sdof,
+        params, model, prop, cellregion_to_sdof,
         **modify_kwargs
     )
 
@@ -230,7 +230,6 @@ def _set_swelling_props(
         param: ExpParam,
         model: Model,
         prop: bv.BlockVector,
-        v: float, m: float,
         cellregion_to_sdof: Mapping[str, NDArray],
         modify_density=True,
         modify_geometry=True,
@@ -263,11 +262,11 @@ def _set_swelling_props(
     # dofs_sha = np.intersect1d(dofs_cov, dofs_bod)
 
     # prop['k_swelling'][0] = KSWELL_FACTOR * 10e3*10
-    prop['m_swelling'][dofs_cov] = m
+    prop['m_swelling'][dofs_cov] = param['mcov']
 
     prop['v_swelling'][:] = 1.0
     if modify_geometry:
-        prop['v_swelling'][dofs_cov] = v
+        prop['v_swelling'][dofs_cov] = param['vcov']
         prop['v_swelling'][dofs_bod] = 1.0
 
     prop['rho'][:] = RHO_VF
@@ -277,11 +276,14 @@ def _set_swelling_props(
         prop['rho'][:] = RHO_VF + (_v-1)*RHO_SWELL
 
     ## TODO : Fix this ad-hoc thing to do the swelling based on damage
-    if param['SwellingDistribution'] != 'uniform':
+    if (
+        param['SwellingDistribution'] != 'uniform'
+        and param['vcov'] != 1.0
+        ):
         param_unswollen = param.substitute({
             'vcov': 1.0
         })
-        with h5py.File(f'out/postprocess.h5', mode='r+') as f:
+        with h5py.File(f'out/postprocess.h5', mode='a') as f:
             # damage_key = 'field.tavg_viscous_rate'
             damage_key = param['SwellingDistribution']
             group_name = param_unswollen.to_str()
@@ -303,19 +305,21 @@ def _set_swelling_props(
         residual = model.solid.residual
         damage = residual.form['coeff.prop.v_swelling'].copy()
         damage.vector()[:] = _damage
-        v_swell = damage.copy()
+        v_swelling = damage.copy()
 
         cell_label_to_id = residual.mesh_function_label_to_value('cell')
         dx = residual.measure('dx')
         dx_cover = dx(int(cell_label_to_id['cover']))
-
-        vol_cov = dfn.assemble(1*dx_cover)
-        v_factor = (v*vol_cov - vol_cov)/dfn.assemble(damage*dx_cover)
-        v_swell.vector()[:] = (1+v_factor*damage.vector()[:])
+        # Make the increase in volume (i.e. `v-1`) proportional to the damage
+        # measure and scale the resulting swelling field so that the total
+        # prescribed volume increase is `param['vcov']`
+        original_vol = dfn.assemble(1*dx_cover)
+        swollen_vol_incr = dfn.assemble(damage*dx_cover)
+        v_factor = (param['vcov']*original_vol - original_vol)/swollen_vol_incr
+        v_swelling.vector()[:] = (1+v_factor*damage.vector()[:])
         # print(dfn.assemble(v_swell*dx_cover)/dfn.assemble(1*dx_cover))
-        prop['v_swelling'][:] = v_swell.vector()[:]
+        prop['v_swelling'][:] = v_swelling.vector()[:]
         prop['v_swelling'][dofs_bod] = 1.0
-        breakpoint()
 
     return prop
 
@@ -401,7 +405,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         paramss = []
     elif study_name == 'test':
         vcovs = [1.0, 1.1, 1.2, 1.3]
-        vcovs = [1.0]
+        vcovs = [1.0, 1.2]
         paramss = [
             ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': 0.5,
@@ -412,7 +416,8 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'mcov': 0.0,
                 'psub': 500*10,
                 'dt': 5e-5, 'tf': 5e-5*10,
-                'ModifyEffect': ''
+                'ModifyEffect': '',
+                'SwellingDistribution': 'field.tavg_viscous_rate'
             })
             for vcov in vcovs
         ]
