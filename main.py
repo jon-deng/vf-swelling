@@ -405,7 +405,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         params = []
     elif study_name == 'test':
         vcovs = [1.0, 1.1, 1.2, 1.3]
-        vcovs = [1.0, 1.2]
+        vcovs = [1.0, 1.15, 1.3]
         params = [
             ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': 0.5,
@@ -704,16 +704,17 @@ def postprocess(
 
 from femvf.vis import xdmfutils
 def postprocess_xdmf(
-        model, param: ExpParam, out_fpath: str,
+        model, param: ExpParam, xdmf_path: str,
         overwrite: bool=False
     ):
     """
     Write an XDMF file
     """
+    xdmf_data_path = f'{path.splitext(xdmf_path)[0]}.h5'
     with (
             h5py.File(f'out/{param.to_str()}.h5') as fstate,
             h5py.File(f'out/postprocess.h5', mode='r') as fpost,
-            h5py.File(out_fpath, mode='w') as fxdmf
+            h5py.File(xdmf_data_path, mode='w') as fxdmf
         ):
         # Export mesh values
         _labels = ['mesh/solid', 'time']
@@ -754,6 +755,7 @@ def postprocess_xdmf(
         static_idxs = [
             (0, ...), (), ()
         ]
+
         temporal_dataset_descrs = [
             (fxdmf['state/u'], 'vector', 'node'),
             (fxdmf['state/v'], 'vector', 'node'),
@@ -764,13 +766,12 @@ def postprocess_xdmf(
             (slice(None),)
         ]
 
-        xdmf_name = f'{path.splitext(path.split(out_fpath)[-1])[0]}.xdmf'
         xdmfutils.write_xdmf(
             fxdmf['mesh/solid'],
             static_dataset_descrs, static_idxs,
             fxdmf['time'],
             temporal_dataset_descrs, temporal_idxs,
-            xdmf_name
+            xdmf_path
         )
 
 def get_result_name_to_postprocess(
@@ -938,7 +939,7 @@ if __name__ == '__main__':
     if clargs.export_xdmf:
         for param in params:
             in_fpath = f'{out_dir}/{param.to_str()}.h5'
-            out_fpath = f'{path.splitext(in_fpath)[0]}--vert.h5'
+            out_fpath = f'{path.splitext(in_fpath)[0]}--vert.xdmf'
 
             model = setup_model(param)
             postprocess_xdmf(
