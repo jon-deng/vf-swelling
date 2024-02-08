@@ -554,10 +554,11 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'psub': 600*10,
                 'dt': 5e-5, 'tf': 0.5,
                 'ModifyEffect': '',
+                'SwellingDistribution': 'field.tavg_viscous_rate'
             })
 
-        vcovs = np.array([1.15])
-        mcovs = np.array([0.0])
+        vcovs = np.array([0.0, 1.1, 1.2, 1.3])
+        mcovs = np.array([0.0, -0.8])
 
         params = [
             make_params(*args) for args in it.product(EMODS, vcovs, mcovs)
