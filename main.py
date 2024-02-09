@@ -27,8 +27,6 @@ from blockarray import blockvec as bv
 
 from exputils import postprocutils, exputils
 
-from blockarray import blockvec as bv
-
 dfn.set_log_level(50)
 
 ## Defaults for 'nominal' parameter values
@@ -420,6 +418,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'SwellingDistribution': 'field.tavg_viscous_rate'
             })
             for vcov in vcovs
+
         ]
     elif study_name == 'test_3d_onset':
         psubs = 10*np.arange(300, 1001, 100)
@@ -711,9 +710,11 @@ def postprocess_xdmf(
     """
     Write an XDMF file
     """
-    xdmf_data_path = f'{path.splitext(xdmf_path)[0]}.h5'
+    xdfm_data_dir, xdmf_basename = path.split(xdmf_path)
+    xdmf_data_basename = f'{path.splitext(xdmf_basename)[0]}.h5'
+    xdmf_data_path = path.join(xdfm_data_dir, xdmf_data_basename)
     with (
-            h5py.File(f'out/{param.to_str()}.h5') as fstate,
+            h5py.File(f'out/{param.to_str()}.h5', mode='r') as fstate,
             h5py.File(f'out/postprocess.h5', mode='r') as fpost,
             h5py.File(xdmf_data_path, mode='w') as fxdmf
         ):
@@ -940,11 +941,13 @@ if __name__ == '__main__':
     if clargs.export_xdmf:
         for param in params:
             in_fpath = f'{out_dir}/{param.to_str()}.h5'
-            out_fpath = f'{path.splitext(in_fpath)[0]}--vert.xdmf'
+            xdmf_path = f'{path.splitext(in_fpath)[0]}--vert.xdmf'
+            xdmf_path = 'temp.xdmf'
+            # xdmf_path = f'{path.splitext(path.basename(in_fpath))[0]}--vert.xdmf'
 
             model = setup_model(param)
             postprocess_xdmf(
-                model, param, out_fpath
+                model, param, xdmf_path
             )
             # if not path.isfile(out_fpath):
             # else:
