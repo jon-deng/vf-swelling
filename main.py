@@ -403,22 +403,21 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         params = []
     elif study_name == 'test':
         vcovs = [1.0, 1.1, 1.2, 1.3]
-        vcovs = [1.0, 1.15, 1.3]
+        vcovs = [1.0]
         params = [
             ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': 0.5,
                 'GA': 3,
-                'DZ': 1.50, 'NZ': 10,
+                'DZ': 1.5, 'NZ': 10,
                 'Ecov': ECOV, 'Ebod': EBOD,
                 'vcov': vcov,
                 'mcov': 0.0,
-                'psub': 500*10,
+                'psub': 600*10,
                 'dt': 5e-5, 'tf': 5e-5*10,
                 'ModifyEffect': '',
-                'SwellingDistribution': 'field.tavg_viscous_rate'
+                'SwellingDistribution': 'uniform'
             })
             for vcov in vcovs
-
         ]
     elif study_name == 'test_3d_onset':
         psubs = 10*np.arange(300, 1001, 100)
@@ -453,7 +452,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
             for vcov in vcovs
         ]
     elif study_name == 'mesh_time_independence':
-        def make_params(clscale, dt):
+        def make_param(clscale, dt):
             return ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': clscale,
                 'Ecov': ECOV, 'Ebod': EBOD,
@@ -467,10 +466,10 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         clscales = 1 * 2.0**np.arange(1, -2, -1)
         dts = 5e-5 * 2.0**np.arange(0, -5, -1)
         params = [
-            make_params(clscale, dt) for clscale in clscales for dt in dts
+            make_param(clscale, dt) for clscale in clscales for dt in dts
         ]
     elif study_name == 'main':
-        def make_params(elayers, vcov, mcov):
+        def make_param(elayers, vcov, mcov):
             return ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
                 'GA': 3, 'DZ': 0.00, 'NZ': 1,
@@ -483,10 +482,10 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
             })
 
         params = [
-            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+            make_param(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
         ]
     elif study_name == 'main_3D':
-        def make_params(elayers, vcov, mcov):
+        def make_param(elayers, vcov, mcov):
             return ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
                 'Ecov': elayers['cover'], 'Ebod': elayers['body'],
@@ -499,10 +498,10 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
             })
 
         params = [
-            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+            make_param(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
         ]
     elif study_name == 'main_coarse':
-        def make_params(elayers, vcov, mcov):
+        def make_param(elayers, vcov, mcov):
             return ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
                 'GA': 3, 'DZ': 0.00, 'NZ': 1,
@@ -518,11 +517,11 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         mcovs = np.array([0.0, -0.8])
 
         params = [
-            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+            make_param(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
         ]
     elif study_name == 'main_3D_unswollen_setup':
         # This case is the setup for the unswollen 3D state
-        def make_params(elayers, vcov, mcov):
+        def make_param(elayers, vcov, mcov):
             return ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
                 'GA': 3, 'DZ': 1.5, 'NZ': 10,
@@ -539,11 +538,11 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         mcovs = np.array([0.0])
 
         params = [
-            make_params(*args) for args in it.product(EMODS, vcovs, mcovs)
+            make_param(*args) for args in it.product(EMODS, vcovs, mcovs)
         ]
     elif study_name == 'main_3D_locally_swollen':
         # This case is the setup for the unswollen 3D state
-        def make_params(elayers, vcov, mcov):
+        def make_param(elayers, vcov, mcov, damage):
             return ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
                 'GA': 3, 'DZ': 1.5, 'NZ': 10,
@@ -553,17 +552,20 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'psub': 600*10,
                 'dt': 5e-5, 'tf': 0.5,
                 'ModifyEffect': '',
-                'SwellingDistribution': 'field.tavg_viscous_rate'
+                'SwellingDistribution': damage
             })
 
         vcovs = np.array([0.0, 1.1, 1.2, 1.3])
         mcovs = np.array([0.0, -0.8])
+        damage_measures = ['field.tavg_viscous_rate', 'field.tavg_strain_energy']
+        damage_measures = ['field.tavg_viscous_rate']
 
         params = [
-            make_params(*args) for args in it.product(EMODS, vcovs, mcovs)
+            make_param(*args)
+            for args in it.product(EMODS, vcovs, mcovs, damage_measures)
         ]
     elif study_name == 'main_coarse_3D':
-        def make_params(elayers, vcov, mcov):
+        def make_param(elayers, vcov, mcov):
             return ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
                 'GA': 3, 'DZ': 1.5, 'NZ': 10,
@@ -579,10 +581,10 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         mcovs = np.array([0.0, -0.8])
 
         params = [
-            make_params(*args) for args in it.product(EMODS, vcovs, mcovs)
+            make_param(*args) for args in it.product(EMODS, vcovs, mcovs)
         ]
     elif study_name == 'main_coarse_3D_xdmf':
-        def make_params(vcov, mcov):
+        def make_param(vcov, mcov):
             return ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
                 'GA': 3, 'DZ': 1.5, 'NZ': 10,
@@ -598,10 +600,10 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         # vcovs = [1.0]
         mcovs = [-0.8]
         params = [
-            make_params(vcov, mcov) for vcov, mcov in it.product(vcovs, mcovs)
+            make_param(vcov, mcov) for vcov, mcov in it.product(vcovs, mcovs)
         ]
     elif study_name == 'const_pregap':
-        def make_params(elayers, vcov, mcov):
+        def make_param(elayers, vcov, mcov):
             return ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
                 'Ecov': elayers['cover'], 'Ebod': elayers['body'],
@@ -613,10 +615,10 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
             })
 
         params = [
-            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+            make_param(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
         ]
     elif study_name == 'const_mass':
-        def make_params(elayers, vcov, mcov):
+        def make_param(elayers, vcov, mcov):
             return ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
                 'Ecov': elayers['cover'], 'Ebod': elayers['body'],
@@ -628,10 +630,10 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
             })
 
         params = [
-            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+            make_param(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
         ]
     elif study_name == 'const_mass_pregap':
-        def make_params(elayers, vcov, mcov):
+        def make_param(elayers, vcov, mcov):
             return ExpParam({
                 'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
                 'Ecov': elayers['cover'], 'Ebod': elayers['body'],
@@ -643,7 +645,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
             })
 
         params = [
-            make_params(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
+            make_param(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
         ]
     else:
         raise ValueError(f"Unknown `--study-name` {study_name}")
@@ -653,25 +655,26 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
 
 ## Main functions for running/postprocessing simulations
 def run(
-        params: dict,
+        param: dict,
         out_dir: str
     ):
     """
     Run the transient simulation
     """
-    # Convert `params` from a dict to the parameters object
-    # This is needed because you can't call `run` in parallel if `params`
-    # is not pickleable (`ExpParams` instances can't be pickled)
-    params = ExpParam(params)
-    model = setup_model(params)
-    state0, controls, prop = setup_state_control_props(params, model)
-
-    dt = params['dt']
-    tf = params['tf']
-    times = dt*np.arange(0, int(round(tf/dt))+1)
-
-    out_path = f'{out_dir}/{params.to_str()}.h5'
+    # We need to convert `param` from a dict to the `ExpParam` object
+    # because you can't call `run` in parallel if `param`
+    # is not pickleable (`ExpParam` instances can't be pickled)
+    param = ExpParam(param)
+    out_path = f'{out_dir}/{param.to_str()}.h5'
     if not path.isfile(out_path):
+        model = setup_model(param)
+        state0, controls, prop = setup_state_control_props(param, model)
+        # breakpoint()
+
+        dt = param['dt']
+        tf = param['tf']
+        times = dt*np.arange(0, int(round(tf/dt))+1)
+
         with sf.StateFile(model, out_path, mode='a') as f:
             forward.integrate(
                 model, f, state0, controls, prop, times, use_tqdm=True
@@ -718,6 +721,7 @@ def postprocess_xdmf(
             h5py.File(f'out/postprocess.h5', mode='r') as fpost,
             h5py.File(xdmf_data_path, mode='w') as fxdmf
         ):
+        # breakpoint()
         # Export mesh values
         _labels = ['mesh/solid', 'time']
         labels = _labels
@@ -751,11 +755,11 @@ def postprocess_xdmf(
         # Annotate the mesh values with an XDMF file
         static_dataset_descrs = [
             (fxdmf['state/u'], 'vector', 'node'),
-            (fxdmf['field.tavg_viscous_rate'], 'scalar', 'center'),
-            (fxdmf['field.tavg_strain_energy'], 'scalar', 'center'),
+            (fxdmf['field.tavg_viscous_rate'], 'scalar', 'Cell'),
+            (fxdmf['field.tavg_strain_energy'], 'scalar', 'Cell'),
         ]
         static_idxs = [
-            (0, ...), (), ()
+            (0, ...), (slice(None),), (slice(None),)
         ]
 
         temporal_dataset_descrs = [
@@ -767,7 +771,7 @@ def postprocess_xdmf(
         temporal_idxs = len(temporal_dataset_descrs)*[
             (slice(None),)
         ]
-
+        # breakpoint()
         xdmfutils.write_xdmf(
             fxdmf['mesh/solid'],
             static_dataset_descrs, static_idxs,
@@ -941,9 +945,11 @@ if __name__ == '__main__':
     if clargs.export_xdmf:
         for param in params:
             in_fpath = f'{out_dir}/{param.to_str()}.h5'
-            xdmf_path = f'{path.splitext(in_fpath)[0]}--vert.xdmf'
-            xdmf_path = 'temp.xdmf'
-            # xdmf_path = f'{path.splitext(path.basename(in_fpath))[0]}--vert.xdmf'
+            xdmf_path = (
+                f"vis--vcov{param['vcov']:.2e}--mcov{param['mcov']:.2e}"
+                f"--distribution{param['SwellingDistribution']:s}.xdmf"
+            )
+            # xdmf_path = 'temp.xdmf'
 
             model = setup_model(param)
             postprocess_xdmf(
