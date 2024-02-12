@@ -555,10 +555,38 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'SwellingDistribution': damage
             })
 
-        vcovs = np.array([0.0, 1.1, 1.2, 1.3])
+        vcovs = np.array([1.0, 1.1, 1.2, 1.3])
         mcovs = np.array([0.0, -0.8])
-        damage_measures = ['field.tavg_viscous_rate', 'field.tavg_strain_energy']
-        damage_measures = ['field.tavg_viscous_rate']
+        damage_measures = [
+            'field.tavg_viscous_rate',
+            'field.tavg_strain_energy'
+        ]
+
+        params = [
+            make_param(*args)
+            for args in it.product(EMODS, vcovs, mcovs, damage_measures)
+        ]
+    elif study_name == 'main_3D_locally_swollen_xdmf':
+        # This case is the setup for the unswollen 3D state
+        def make_param(elayers, vcov, mcov, damage):
+            return ExpParam({
+                'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
+                'GA': 3, 'DZ': 1.5, 'NZ': 10,
+                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'vcov': vcov,
+                'mcov': mcov,
+                'psub': 600*10,
+                'dt': 5e-5, 'tf': 0.5,
+                'ModifyEffect': '',
+                'SwellingDistribution': damage
+            })
+
+        vcovs = np.array([1.0, 1.3])
+        mcovs = np.array([0.0])
+        damage_measures = [
+            'field.tavg_viscous_rate',
+            'field.tavg_strain_energy'
+        ]
 
         params = [
             make_param(*args)
