@@ -963,7 +963,7 @@ def get_result_name_to_postprocess(
         'field.tavg_strain_energy': lambda f: TimeSeriesStats(proc_strain_energy).mean(f, range(f.size//2, f.size)),
         'field.tini_hydrostatic': lambda f: proc_hydro_field(f.get_state(0), f.get_control(0), f.get_prop()),
         'field.tini_vm': lambda f: proc_vm_field(f.get_state(0), f.get_control(0), f.get_prop()),
-        'field.vswell': lambda f: f.get_prop()['v_swelling'],
+        # 'field.vswell': lambda f: f.get_prop().sub['v_swelling'],
 
         'time.spatial_stats_con_p': TimeSeries(make_cpressure_field_stats()),
         'time.spatial_stats_con_a': TimeSeries(make_carea_field_stats()),
