@@ -479,14 +479,15 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         ]
     elif study_name == 'main_3D_setup':
         # This case is the setup for the unswollen 3D state
-        def make_param(elayers, vcov, mcov):
+        def make_param(elayers, vcov, mcov, damage):
             return DEFAULT_PARAM_3D.substitute({
                 'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'vcov': vcov, 'mcov': mcov
+                'vcov': vcov, 'mcov': mcov,
+                'SwellingDistribution': damage
             })
 
         vcovs = np.array([1.0])
-        mcovs = np.array([0.0, -0.8])
+        mcovs = np.array([0.0, -0.8, -1.6])
         damage_measures = [
             'field.tavg_viscous_rate',
             'field.tavg_strain_energy'
@@ -505,6 +506,28 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'SwellingDistribution': damage
             })
 
+        vcovs = np.array([1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3])
+        mcovs = np.array([0.0, -0.8, -1.6])
+        damage_measures = [
+            'field.tavg_viscous_rate',
+            # 'field.tavg_strain_energy'
+        ]
+
+        params = [
+            make_param(*args)
+            for args in it.product(EMODS, vcovs, mcovs, damage_measures)
+        ]
+    elif study_name == 'main_3D_coarse':
+        # This case is the setup for the unswollen 3D state
+        def make_param(elayers, vcov, mcov, damage):
+            return DEFAULT_PARAM_3D.substitute({
+                'MeshName': MESH_BASE_NAME, 'clscale': 0.5,
+                'GA': 3, 'DZ': 1.5, 'NZ': 10,
+                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'vcov': vcov, 'mcov': mcov,
+                'SwellingDistribution': damage
+            })
+
         vcovs = np.array([1.0, 1.1, 1.2, 1.3])
         mcovs = np.array([0.0, -0.8])
         damage_measures = [
@@ -516,7 +539,8 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
             make_param(*args)
             for args in it.product(EMODS, vcovs, mcovs, damage_measures)
         ]
-    elif study_name == 'main_3D_coarse':
+    elif study_name == 'main_3D_xdmf':
+        # This case is the setup for the unswollen 3D state
         def make_param(elayers, vcov, mcov, damage):
             return DEFAULT_PARAM_3D.substitute({
                 'Ecov': elayers['cover'], 'Ebod': elayers['body'],
@@ -805,7 +829,7 @@ def get_result_name_to_postprocess(
         'field.tavg_strain_energy': lambda f: TimeSeriesStats(proc_strain_energy).mean(f, range(f.size//2, f.size)),
         'field.tini_hydrostatic': lambda f: proc_hydro_field(f.get_state(0), f.get_control(0), f.get_prop()),
         'field.tini_vm': lambda f: proc_vm_field(f.get_state(0), f.get_control(0), f.get_prop()),
-        'field.vswell': lambda f: f.get_prop()['v_swelling'],
+        # 'field.vswell': lambda f: f.get_prop().sub['v_swelling'],
 
         'time.spatial_stats_con_p': TimeSeries(make_cpressure_field_stats()),
         'time.spatial_stats_con_a': TimeSeries(make_carea_field_stats()),
