@@ -73,7 +73,7 @@ def setup_mesh_name(param: ExpParam) -> str:
     clscale = param['clscale']
     dz = param['DZ']
     nz = param['NZ']
-    return f'{base_name}--GA{ga:.2f}--DZ{dz:.2f}--NZ{nz:d}--clscale{clscale:.2e}'
+    return f'{base_name}--GA{ga:.2f}--DZ{dz:.2e}--NZ{nz:d}--CL{clscale:.2e}'
 
 def setup_model(param: ExpParam) -> Model:
     """
@@ -417,7 +417,19 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         'Ecov': ECOV, 'Ebod': EBOD,
         'vcov': 1, 'mcov': 0.0,
         'psub': 600*10,
-        'dt': 5e-5, 'tf': 5e-5*2,
+        'dt': 5e-5, 'tf': 0.5,
+        'ModifyEffect': '',
+        'SwellingDistribution': 'uniform'
+    })
+
+    DEFAULT_PARAM_COARSE_3D = ExpParam({
+        'MeshName': MESH_BASE_NAME, 'clscale': 0.75,
+        'GA': 3,
+        'DZ': 1.5, 'NZ': 15,
+        'Ecov': ECOV, 'Ebod': EBOD,
+        'vcov': 1, 'mcov': 0.0,
+        'psub': 600*10,
+        'dt': 5e-5, 'tf': 0.2,
         'ModifyEffect': '',
         'SwellingDistribution': 'uniform'
     })
@@ -428,11 +440,11 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         vcovs = [1.0]
         params = [
             DEFAULT_PARAM_3D.substitute({
-                'MeshName': MESH_BASE_NAME, 'clscale': 0.5,
+                'MeshName': MESH_BASE_NAME, 'clscale': 1.0,
                 'GA': 3,
-                'DZ': 1.5, 'NZ': 10,
+                'DZ': 1.5, 'NZ': 15,
                 'Ecov': ECOV, 'Ebod': EBOD,
-                'vcov': vcov,
+                'vcov': vcov, 'mcov': 0.0,
                 'psub': 600*10,
                 'dt': 5e-5, 'tf': 5e-5*10
             })
@@ -463,7 +475,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         params = [
             make_param(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
         ]
-    elif study_name == 'main_2D_coarse':
+    elif study_name == 'main_coarse_2D':
         def make_param(elayers, vcov, mcov):
             return DEFAULT_PARAM_2D.substitute({
                 'Ecov': elayers['cover'], 'Ebod': elayers['body'],
@@ -517,22 +529,39 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
             make_param(*args)
             for args in it.product(EMODS, vcovs, mcovs, damage_measures)
         ]
-    elif study_name == 'main_3D_coarse':
+    elif study_name == 'main_coarse_3D_setup':
         # This case is the setup for the unswollen 3D state
         def make_param(elayers, vcov, mcov, damage):
-            return DEFAULT_PARAM_3D.substitute({
-                'MeshName': MESH_BASE_NAME, 'clscale': 0.5,
-                'GA': 3, 'DZ': 1.5, 'NZ': 10,
+            return DEFAULT_PARAM_COARSE_3D.substitute({
                 'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'vcov': vcov, 'mcov': mcov,
-                'SwellingDistribution': damage
+                'vcov': vcov, 'mcov': mcov, 'SwellingDistribution': damage
+            })
+
+        vcovs = np.array([1.0])
+        mcovs = np.array([0.0, -0.8])
+        damage_measures = [
+            'field.tavg_viscous_rate',
+            # 'field.tavg_strain_energy'
+        ]
+
+        params = [
+            make_param(*args)
+            for args in it.product(EMODS, vcovs, mcovs, damage_measures)
+        ]
+    elif study_name == 'main_coarse_3D':
+        # This case is the setup for the unswollen 3D state
+        def make_param(elayers, vcov, mcov, damage):
+            return DEFAULT_PARAM_COARSE_3D.substitute({
+                'MeshName': MESH_BASE_NAME,
+                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'vcov': vcov, 'mcov': mcov, 'SwellingDistribution': damage
             })
 
         vcovs = np.array([1.0, 1.1, 1.2, 1.3])
         mcovs = np.array([0.0, -0.8])
         damage_measures = [
             'field.tavg_viscous_rate',
-            'field.tavg_strain_energy'
+            # 'field.tavg_strain_energy'
         ]
 
         params = [
