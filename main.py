@@ -557,7 +557,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                 'vcov': vcov, 'mcov': mcov, 'SwellingDistribution': damage
             })
 
-        vcovs = np.array([1.0, 1.1, 1.2, 1.3])
+        vcovs = np.array([1.0, 1.025, 1.05, 1.075, 1.1])
         mcovs = np.array([0.0, -0.8])
         damage_measures = [
             'field.tavg_viscous_rate',
