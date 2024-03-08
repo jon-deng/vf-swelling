@@ -429,7 +429,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         'Ecov': ECOV, 'Ebod': EBOD,
         'vcov': 1, 'mcov': 0.0,
         'psub': 600*10,
-        'dt': 5e-5, 'tf': 0.25,
+        'dt': 5e-5, 'tf': 0.50,
         'ModifyEffect': '',
         'SwellingDistribution': 'uniform'
     })
