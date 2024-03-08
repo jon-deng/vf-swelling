@@ -531,14 +531,16 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         ]
     elif study_name == 'main_coarse_3D_setup':
         # This case is the setup for the unswollen 3D state
-        def make_param(elayers, vcov, mcov, damage):
+        def make_param(elayers, vcov, mcov, psub, damage):
             return DEFAULT_PARAM_COARSE_3D.substitute({
                 'Ecov': elayers['cover'], 'Ebod': elayers['body'],
+                'psub': psub,
                 'vcov': vcov, 'mcov': mcov, 'SwellingDistribution': damage
             })
 
         vcovs = np.array([1.0])
         mcovs = np.array([0.0, -0.8])
+        psubs = np.array([600*10, 610*10])
         damage_measures = [
             'field.tavg_viscous_rate',
             # 'field.tavg_strain_energy'
@@ -546,7 +548,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
 
         params = [
             make_param(*args)
-            for args in it.product(EMODS, vcovs, mcovs, damage_measures)
+            for args in it.product(EMODS, vcovs, mcovs, psubs, damage_measures)
         ]
     elif study_name == 'main_coarse_3D':
         # This case is the setup for the unswollen 3D state
