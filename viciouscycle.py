@@ -27,10 +27,10 @@ from numpy.typing import NDArray
 import numpy as np
 import dolfin as dfn
 
+from femvf import forward, statefile as sf
 from femvf.postprocess.base import TimeSeriesStats
 from femvf.postprocess import solid as slsig
 from femvf.models.transient import coupled
-from femvf import forward
 from blockarray import blockvec as bv
 
 Model = coupled.BaseTransientFSIModel
@@ -58,7 +58,8 @@ def compensate(
 
 def damage_rate(
         model: Model,
-        prop: bv.BlockVector, control: bv.BlockVector
+        prop: bv.BlockVector, control: bv.BlockVector,
+        times: NDArray
     ) -> NDArray:
     """
     Return the damage accumulation rate
@@ -71,9 +72,18 @@ def damage_rate(
         The target voice outputs
     prop, control: bv.BlockVector
         The set of model properties (phonation conditions)
+    times:
+        The integration times
     """
 
-
+    # Run the model to figure out the damage rate
+    with sf.StateFile(model, '', mode='w') as f:
+        ini_state = model.state0
+        ini_state[:] = 0
+        times = np.linspace()
+        _, solver_info = forward.integrate(
+            model, f, ini_state, [control], prop, times
+        )
 
     # TODO: You could/should make `measure` a parameter that's passed in
     dx = model.solid.residual.measure('dx')
@@ -85,6 +95,8 @@ def damage_rate(
     def measure(f):
         mean = TimeSeriesStats(state_measure).mean(f, range(f.size//2, f.size))
         return mean
+
+    return measure(f)
 
 
 def swelling_rate(
@@ -104,3 +116,6 @@ def swelling_rate(
     prop, control: bv.BlockVector
         The set of model properties (phonation conditions)
     """
+    K = 1
+
+    return K * damage_rate
