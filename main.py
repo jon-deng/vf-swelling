@@ -8,7 +8,6 @@ from numpy.typing import NDArray
 from os import path
 import argparse as ap
 import multiprocessing as mp
-import itertools as it
 import functools
 from typing import List, Mapping
 
@@ -27,40 +26,11 @@ from blockarray import blockvec as bv
 
 from exputils import postprocutils, exputils
 
+from cases import ExpParam, make_exp_params
+
 dfn.set_log_level(50)
 
-## Defaults for 'nominal' parameter values
-MESH_BASE_NAME = 'M5_BC'
-
-CLSCALE = 0.5
-
 POISSONS_RATIO = 0.4
-
-PSUB = 300 * 10
-
-VCOVERS = np.array([1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3])
-MCOVERS = np.array([0.0, -0.4, -0.8, -1.2, -1.6])
-
-ECOV = 2.5e4
-EBOD = 5e4
-
-PARAM_SPEC = {
-    'MeshName': str,
-    'GA': float,
-    'DZ': float,
-    'NZ': int,
-    'clscale': float,
-    'Ecov': float,
-    'Ebod': float,
-    'vcov': float,
-    'mcov': float,
-    'psub': float,
-    'dt': float,
-    'tf': float,
-    'ModifyEffect': str,
-    'SwellingDistribution': str
-}
-ExpParam = exputils.make_parameters(PARAM_SPEC)
 
 Model = coupled.BaseTransientFSIModel
 
@@ -88,9 +58,18 @@ def setup_model(param: ExpParam) -> Model:
     else:
         raise ValueError("Parameter 'DZ' must be >= 0")
 
+    if param['SwellingModel'] == 'linear':
+        SolidType = solid.SwellingKelvinVoigtWEpitheliumNoShape
+    elif param['SwellingModel'] == 'power':
+        SolidType = solid.SwellingPowerLawKelvinVoigtWEpitheliumNoShape
+    else:
+        raise ValueError(
+            "Parameter 'SwellingModel' must be 'linear' or 'power'"
+        )
+
     model = load_transient_fsi_model(
         mesh_path, None,
-        SolidType=solid.SwellingKelvinVoigtWEpitheliumNoShape,
+        SolidType=SolidType,
         FluidType=fluid.BernoulliAreaRatioSep,
         zs=zs
     )
@@ -203,7 +182,7 @@ def setup_controls(param: ExpParam, model: Model) -> bv.BlockVector:
 
     return [control]
 
-def setup_ini_state(param: ExpParam, model: Model) -> bv.BlockVector:
+def setup_ini_state(param: ExpParam, model: Model, dvcov: float=0.025) -> bv.BlockVector:
     """
     Set the initial state vector
     """
@@ -212,7 +191,7 @@ def setup_ini_state(param: ExpParam, model: Model) -> bv.BlockVector:
     model.solid.control[:] = 0.0
 
     vcov = param['vcov']
-    nload = max(int(round((vcov-1)/0.025)), 1)
+    nload = max(int(round((vcov-1)/dvcov)), 1)
 
     prop = setup_basic_props(param, model)
     model.set_prop(prop)
@@ -396,238 +375,6 @@ def solve_static_swollen_config(
             model, control, props_n, state=static_state_n
         )
     return static_state_n, info
-
-
-def make_exp_params(study_name: str) -> List[ExpParam]:
-    DEFAULT_PARAM_2D = ExpParam({
-        'MeshName': MESH_BASE_NAME, 'clscale': CLSCALE,
-        'GA': 3, 'DZ': 0.00, 'NZ': 1,
-        'Ecov': ECOV, 'Ebod': EBOD,
-        'vcov': 1.0, 'mcov': 0.0,
-        'psub': PSUB,
-        'dt': DT, 'tf': TF,
-        'ModifyEffect': '',
-        'SwellingDistribution': 'uniform'
-    })
-
-    DEFAULT_PARAM_3D = ExpParam({
-        'MeshName': MESH_BASE_NAME, 'clscale': 0.25,
-        'GA': 3,
-        'DZ': 1.5, 'NZ': 15,
-        'Ecov': ECOV, 'Ebod': EBOD,
-        'vcov': 1, 'mcov': 0.0,
-        'psub': 600*10,
-        'dt': 5e-5, 'tf': 0.5,
-        'ModifyEffect': '',
-        'SwellingDistribution': 'uniform'
-    })
-
-    DEFAULT_PARAM_COARSE_3D = ExpParam({
-        'MeshName': MESH_BASE_NAME, 'clscale': 0.75,
-        'GA': 3,
-        'DZ': 1.5, 'NZ': 15,
-        'Ecov': ECOV, 'Ebod': EBOD,
-        'vcov': 1, 'mcov': 0.0,
-        'psub': 600*10,
-        'dt': 5e-5, 'tf': 0.50,
-        'ModifyEffect': '',
-        'SwellingDistribution': 'uniform'
-    })
-    if study_name == 'none':
-        params = []
-    elif study_name == 'test':
-        vcovs = [1.0, 1.1, 1.2, 1.3]
-        vcovs = [1.0]
-        params = [
-            DEFAULT_PARAM_3D.substitute({
-                'MeshName': MESH_BASE_NAME, 'clscale': 1.0,
-                'GA': 3,
-                'DZ': 1.5, 'NZ': 15,
-                'Ecov': ECOV, 'Ebod': EBOD,
-                'vcov': vcov, 'mcov': 0.0,
-                'psub': 600*10,
-                'dt': 5e-5, 'tf': 5e-5*10
-            })
-            for vcov in vcovs
-        ]
-    elif study_name == 'independence_2D':
-        def make_param(clscale, dt):
-            return DEFAULT_PARAM_2D.substitute({
-                'clscale': clscale,
-                'Ecov': ECOV, 'Ebod': EBOD,
-                'vcov': 1.3, 'mcov': -1.6,
-                'psub': PSUB,
-                'dt': dt, 'tf': 0.5
-            })
-
-        clscales = 1 * 2.0**np.arange(1, -2, -1)
-        dts = 5e-5 * 2.0**np.arange(0, -5, -1)
-        params = [
-            make_param(clscale, dt) for clscale in clscales for dt in dts
-        ]
-    elif study_name == 'main_2D':
-        def make_param(elayers, vcov, mcov):
-            return DEFAULT_PARAM_2D.substitute({
-                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'vcov': vcov, 'mcov': mcov
-            })
-
-        params = [
-            make_param(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
-        ]
-    elif study_name == 'main_coarse_2D':
-        def make_param(elayers, vcov, mcov):
-            return DEFAULT_PARAM_2D.substitute({
-                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'vcov': vcov, 'mcov': mcov,
-                'dt': 1e-4, 'tf': 0.5
-            })
-
-        vcovs = np.array([1.0, 1.1, 1.2, 1.3])
-        mcovs = np.array([0.0, -0.8])
-
-        params = [
-            make_param(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
-        ]
-    elif study_name == 'main_3D_setup':
-        # This case is the setup for the unswollen 3D state
-        def make_param(elayers, vcov, mcov, damage):
-            return DEFAULT_PARAM_3D.substitute({
-                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'vcov': vcov, 'mcov': mcov,
-                'SwellingDistribution': damage
-            })
-
-        vcovs = np.array([1.0])
-        mcovs = np.array([0.0, -0.8, -1.6])
-        damage_measures = [
-            'field.tavg_viscous_rate',
-            # 'field.tavg_strain_energy'
-        ]
-
-        params = [
-            make_param(*args)
-            for args in it.product(EMODS, vcovs, mcovs, damage_measures)
-        ]
-    elif study_name == 'main_3D':
-        # This case is the setup for the unswollen 3D state
-        def make_param(elayers, vcov, mcov, damage):
-            return DEFAULT_PARAM_3D.substitute({
-                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'vcov': vcov, 'mcov': mcov,
-                'SwellingDistribution': damage
-            })
-
-        vcovs = np.array([1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3])
-        mcovs = np.array([0.0, -0.8, -1.6])
-        damage_measures = [
-            'field.tavg_viscous_rate',
-            # 'field.tavg_strain_energy'
-        ]
-
-        params = [
-            make_param(*args)
-            for args in it.product(EMODS, vcovs, mcovs, damage_measures)
-        ]
-    elif study_name == 'main_coarse_3D_setup':
-        # This case is the setup for the unswollen 3D state
-        def make_param(elayers, vcov, mcov, psub, damage):
-            return DEFAULT_PARAM_COARSE_3D.substitute({
-                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'psub': psub,
-                'vcov': vcov, 'mcov': mcov, 'SwellingDistribution': damage
-            })
-
-        vcovs = np.array([1.0])
-        mcovs = np.array([0.0, -0.8])
-        psubs = np.array([600*10, 610*10])
-        damage_measures = [
-            'field.tavg_viscous_rate',
-            # 'field.tavg_strain_energy'
-        ]
-
-        params = [
-            make_param(*args)
-            for args in it.product(EMODS, vcovs, mcovs, psubs, damage_measures)
-        ]
-    elif study_name == 'main_coarse_3D':
-        # This case is the setup for the unswollen 3D state
-        def make_param(elayers, vcov, mcov, damage):
-            return DEFAULT_PARAM_COARSE_3D.substitute({
-                'MeshName': MESH_BASE_NAME,
-                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'vcov': vcov, 'mcov': mcov, 'SwellingDistribution': damage
-            })
-
-        vcovs = np.array([1.0, 1.025, 1.05, 1.075, 1.1])
-        mcovs = np.array([0.0, -0.8])
-        damage_measures = [
-            'field.tavg_viscous_rate',
-            # 'field.tavg_strain_energy'
-        ]
-
-        params = [
-            make_param(*args)
-            for args in it.product(EMODS, vcovs, mcovs, damage_measures)
-        ]
-    elif study_name == 'main_3D_xdmf':
-        # This case is the setup for the unswollen 3D state
-        def make_param(elayers, vcov, mcov, damage):
-            return DEFAULT_PARAM_3D.substitute({
-                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'vcov': vcov, 'mcov': mcov,
-                'dt': 1e-4, 'tf': 0.25, 'clscale': 0.5, 'NZ': 10,
-                'SwellingDistribution': damage
-            })
-
-        vcovs = np.array([1.0, 1.1, 1.2, 1.3])
-        mcovs = np.array([0.0, -0.8, -1.6])
-        damage_measures = [
-            'field.tavg_viscous_rate',
-            'field.tavg_strain_energy'
-        ]
-
-        params = [
-            make_param(*args)
-            for args in it.product(EMODS, vcovs, mcovs, damage_measures)
-        ]
-    elif study_name == 'const_pregap':
-        def make_param(elayers, vcov, mcov):
-            return DEFAULT_PARAM_2D.substitute({
-                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'vcov': vcov, 'mcov': mcov,
-                'ModifyEffect': 'const_pregap'
-            })
-
-        params = [
-            make_param(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
-        ]
-    elif study_name == 'const_mass':
-        def make_param(elayers, vcov, mcov):
-            return DEFAULT_PARAM_2D.substitute({
-                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'vcov': vcov, 'mcov': mcov,
-                'ModifyEffect': 'const_mass'
-            })
-
-        params = [
-            make_param(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
-        ]
-    elif study_name == 'const_mass_pregap':
-        def make_param(elayers, vcov, mcov):
-            return DEFAULT_PARAM_2D.substitute({
-                'Ecov': elayers['cover'], 'Ebod': elayers['body'],
-                'vcov': vcov, 'mcov': mcov,
-                'ModifyEffect': 'const_mass_pregap'
-            })
-
-        params = [
-            make_param(*args) for args in it.product(EMODS, VCOVERS, MCOVERS)
-        ]
-    else:
-        raise ValueError(f"Unknown `--study-name` {study_name}")
-
-    return params
 
 
 ## Main functions for running/postprocessing simulations
@@ -884,25 +631,25 @@ if __name__ == '__main__':
     parser.add_argument("--study-name", type=str, default='none')
     parser.add_argument("--output-dir", type=str, default='out')
     parser.add_argument("--overwrite-results", type=str, action='extend', nargs='+')
-    parser.add_argument("--default-dt", type=float, default=1.25e-5)
-    parser.add_argument("--default-tf", type=float, default=0.5)
+    # parser.add_argument("--default-dt", type=float, default=1.25e-5)
+    # parser.add_argument("--default-tf", type=float, default=0.5)
     parser.add_argument("--export-xdmf", action='store_true', default=False)
     clargs = parser.parse_args()
 
-    TF = clargs.default_tf
-    DT = clargs.default_dt
+    # TF = clargs.default_tf
+    # DT = clargs.default_dt
 
     postprocess = functools.partial(
         postprocess, overwrite_results=clargs.overwrite_results
     )
 
     # Pack up the emod arguments to a dict format
-    _emods = np.array([[2.5, 5.0]]) * 1e3 * 10
-    layer_labels = ['cover', 'body']
-    EMODS = [
-        {label: value for label, value in zip(layer_labels, layer_values)}
-        for layer_values in _emods
-    ]
+    # _emods = np.array([[2.5, 5.0]]) * 1e3 * 10
+    # layer_labels = ['cover', 'body']
+    # EMODS = [
+    #     {label: value for label, value in zip(layer_labels, layer_values)}
+    #     for layer_values in _emods
+    # ]
 
     ## Run and postprocess simulations
     out_dir = clargs.output_dir
