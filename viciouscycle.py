@@ -39,6 +39,8 @@ from blockarray import blockvec as bv
 from scipy import signal
 from vfsig import clinical, fftutils, modal
 
+from nonlineq import newton_solve
+
 Model = coupled.BaseTransientFSIModel
 
 def proc_time(f):
@@ -85,7 +87,7 @@ def proc_prms(t, q):
 
     return prms
 
-def voice_outputs(f: sf.StateFile):
+def proc_voice_output(f: sf.StateFile):
     t = proc_time(f)
     q = proc_glottal_flow_rate(f)
 
@@ -97,13 +99,90 @@ def voice_outputs(f: sf.StateFile):
 
     return prms, fund_freq
 
+def proc_compensatory_input(
+        model: Model, x0: NDArray,
+        const_control: bv.BlockVector, const_prop: bv.BlockVector
+    ):
+    """
+    Return model parameters from compensatory inputs
+
+    Parameters
+    ----------
+    model: Model
+        The model used to simulate voice outputs
+    x0: sf.StateFile
+        The statefile corresponding to the linearization point
+    """
+    # `x0[0]` corresponds to an increment in subglottal pressure
+    control = const_control.copy()
+    nfluid = len(model.fluids)
+    for n in range(nfluid):
+        control[f'fluid{n}.psub'] = const_control[f'fluid{n}.psub'] + x0[0]
+
+    # `x0[1]` corresponds to changes in elastic modulus
+    # It increments stiffness from the constant distribution
+    # A value of 1 will add a maximum of 1 cgs pressure unit (0.1 Pa) to the
+    # stiffness
+    dprop = const_prop.copy()
+    dprop[:] = 0
+    demod = const_prop.sub['emod']/np.max(const_prop.sub['emod'])
+    dprop['emod'][:] = x0[1]*demod
+    prop = const_prop + dprop
+
+    # The initial state is just a static state
+    ini_state = model.state0
+    ini_state[:] = 0
+
+    return ini_state, control, prop
+
+def voice_output_jac(
+        model: Model, x0: NDArray, f0: sf.StateFile,
+        const_control, const_prop
+    ):
+    """
+    Return model parameters needed to achieve target voice outputs
+
+    Parameters
+    ----------
+    model: Model
+        The model used to simulate voice outputs
+    f0: sf.StateFile
+        The statefile corresponding to the linearization point
+    """
+    # Calculate voice output sensitivity to phonation parameters
+    # with a FD approximation
+    times = f0.get_times()
+    voice_output0 = proc_voice_output(f0)
+
+    # Populate the voice output sensitivity matrix column-by-column
+    # Use a subglottal pressure change of 5 Pa
+    # Use a maximum stiffness change of 500 Pa
+    dinputs = (5 * 10, 500 * 10)
+    voice_output_jac = np.zeros((len(voice_output0), len(x0)))
+    for j, dx in enumerate(dinputs):
+        # Run a simulation with the incremented comp. inputs to find the change
+        # in voice outputs
+        dinput = np.zeros(len(x0))
+        dinput[j] = dx
+        ini_state, control1, prop1 = proc_compensatory_input(
+            x0+dinput, const_control, const_prop
+        )
+        with sf.StateFile(model, 'tmp.h5', mode='w') as f:
+            _, solver_info = forward.integrate(
+                model, f, ini_state, [control1], prop1, times
+            )
+            voice_output1 = proc_voice_output(f)
+
+        voice_output_jac[:, j] = (voice_output1-voice_output0)/dinputs[j]
+
+    return voice_output0, voice_output_jac
 
 def compensate(
         model: Model,
         targets: Any,
-        prop0: bv.BlockVector, control0: bv.BlockVector,
-        times: NDArray,
-        f0: sf.StateFile
+        x0: NDArray,
+        f0: sf.StateFile,
+        const_control, const_prop
     ) -> bv.BlockVector:
     """
     Return model parameters needed to achieve target voice outputs
@@ -114,65 +193,33 @@ def compensate(
         The model used to simulate voice outputs
     targets:
         The target voice outputs
-    prop0, control0: bv.BlockVector
-        A set of model properties that are constants or initial guesses
-
-        Model parameters that are variable for achieving target outputs will
-        be changed starting from the initial values given in these arguments.
-    times:
-        The integration times
     f0:
         The statefile corresponding to a model run with the supplied initial guess
     """
     # To find the appropriate compensatory adjustments, use an iterative Newton
     # method
-    # Calculate voice output sensitivity to phonation parameters
-    # with a FD approximation
-    voice_output0 = voice_outputs(f0)
 
-    # Populate the voice output sensitivity matrix column-by-column
-    # Use a subglottal pressure change of 5 Pa
-    # Use a maximum stiffness change of 500 Pa
-    input_labels = ('psub', 'emod')
-    dinputs = (5 * 10, 500 * 10)
-    voice_output_jac = np.zeros((len(voice_output0), len(input_labels)))
-    for j, input_label in enumerate(input_labels):
-        dcontrol = control0.copy()
-        dcontrol[:] = 0
-        dprop = prop0.copy()
-        dprop[:] = 0
+    def lin_subproblem(x):
+        # Calculate voice output sensitivity to phonation parameters
+        # with a FD approximation
+        y0, jac = voice_output_jac(model, x0, f0, const_control, const_prop)
+        y1 = targets
 
+        def assem_res(x):
+            return y1 - y0
 
-        if input_label == 'psub':
-            dcontrol['psub'] = dinputs[0]
-            dprop[:] = 0
-        elif input_label == 'emod':
-            dcontrol[:] = 0
-            dprop[:] = 0
-            scaled_emod = prop0.sub['emod']/np.max(prop0.sub['emod'])
-            dprop['emod'] = dinputs[1] * scaled_emod
+        def assem_jac(x):
+            return -jac
 
-        # Run a simulation with the incremented control/prop to find
-        # the change in voice outputs
-        control1 = control0 + dcontrol
-        prop1 = prop0 + dprop
-        ini_state = model.state0
-        ini_state[:] = 0
-        with sf.StateFile(model, 'tmp.h5', mode='w') as f:
-            _, solver_info = forward.integrate(
-                model, f, ini_state, [control1], prop1, times
-            )
-            voice_output1 = voice_outputs(f)
+    x, info = newton_solve(x0, lin_subproblem, lambda x: np.linalg.norm(x))
 
-        voice_output_jac[:, j] = (voice_output1-voice_output0)/dinputs
-
-    return voice_output_jac
+    return x
 
 def damage_rate(
         model: Model,
-        prop: bv.BlockVector, control: bv.BlockVector,
-        times: NDArray,
-        fname: str
+        x: NDArray,
+        f: sf.StateFile,
+        const_control, const_prop
     ) -> NDArray:
     """
     Return the damage accumulation rate
@@ -199,34 +246,19 @@ def damage_rate(
         mean = TimeSeriesStats(state_measure).mean(f, range(f.size//2, f.size))
         return mean
 
-    # Run the model to figure out the damage rate
-    ini_state = model.state0
-    ini_state[:] = 0
-    with sf.StateFile(model, fname, mode='w', driver='') as f:
-        _, solver_info = forward.integrate(
-            model, f, ini_state, [control], prop, times
-        )
-        damage = measure(f)
-
-    return f
+    damage = measure(f)
+    return damage
 
 def swelling_rate(
-        model: Model,
-        damage_rate: NDArray,
-        prop: bv.BlockVector, control: bv.BlockVector
+        damage_rate: NDArray
     ) -> NDArray:
     """
     Return the swelling rate
 
     Parameters
     ----------
-    model: Model
-        The model used to simulate voice outputs
     damage_rate:
         The damage accumulation rate
-    prop, control: bv.BlockVector
-        The set of model properties (phonation conditions)
     """
-    K = 1
-
+    K = 1.0
     return K * damage_rate
