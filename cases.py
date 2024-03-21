@@ -205,9 +205,9 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         ]
 
         params = [
-            make_param(*args)
+            make_param(*args[0], *args[1:])
             for args in itls.product(
-                clscales, nzs,
+                zip(clscales, nzs),
                 EMODS, vcovs, mcovs, psubs,
                 damage_measures
             )
