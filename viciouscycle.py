@@ -25,6 +25,8 @@ This is the non-linear ODE we assume governs the rate at which swelling occurs.
 from typing import Any
 from numpy.typing import NDArray
 
+from tqdm import tqdm
+
 import numpy as np
 import dolfin as dfn
 import h5py
@@ -388,7 +390,8 @@ def integrate_vicious_cycle(
         v_0: NDArray, x_0: NDArray,
         const_control: bv.BlockVector, const_prop: bv.BlockVector,
         times: NDArray,
-        v_step: float = 0.05
+        n_step: int=1,
+        v_step: float=0.05
     ):
     """
     Integrate the vicious cycle
@@ -409,7 +412,7 @@ def integrate_vicious_cycle(
         vd_0 = proc_swelling_rate(damage_rate)
 
     # Loops through steps of the vicious cycle (VC)
-    for n in range(1, N):
+    for n in tqdm(range(1, n_step)):
         dv = v_step*vd_0/vd_0.max()
         v_1 = v_0 + dv
         const_prop['v_swelling'] = v_1
@@ -443,9 +446,9 @@ if __name__ == '__main__':
     POSTPROCESS_XDMF = True
 
     param = main.ExpParam({
-        'MeshName': cases.MESH_BASE_NAME, 'clscale': 1.0,
+        'MeshName': cases.MESH_BASE_NAME, 'clscale': 0.75,
         'GA': 3,
-        'DZ': 1.5, 'NZ': 11,
+        'DZ': 1.5, 'NZ': 15,
         'Ecov': cases.ECOV, 'Ebod': cases.EBOD,
         'vcov': 1, 'mcov': 0.0,
         'psub': 600*10,
@@ -456,7 +459,7 @@ if __name__ == '__main__':
     })
     model = main.setup_model(param)
 
-    N = 6
+    N = 4
     fpaths = [f'SwellingStep{n}.h5' for n in range(N)]
     if not all(path.isfile(fpath) for fpath in fpaths):
         ini_state, const_controls, const_prop = main.setup_state_control_props(param, model)
@@ -464,6 +467,7 @@ if __name__ == '__main__':
         # This is how long to integrate the 'voicing' simulations for, which
         # are used to determine damage rates, swelling fields, etc.
         times = 5e-5*np.arange(2**4)
+        # times = 5e-5*np.arange(2**12)
 
         # `v0` and `x0` are the initial swelling field and compensatory inputs
         v_0 = np.ones(const_prop['v_swelling'].shape)
@@ -471,7 +475,7 @@ if __name__ == '__main__':
         x_0 = np.array([0])
         integrate_vicious_cycle(
             model, v_0, x_0, const_controls[0], const_prop, times,
-            v_step=0.05
+            n_step=N, v_step=0.05
         )
 
     if POSTPROCESS_XDMF:
