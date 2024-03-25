@@ -38,7 +38,7 @@ from femvf.models.transient import coupled
 from blockarray import blockvec as bv
 
 from scipy import signal
-from vfsig import clinical, fftutils
+from vfsig import clinical, fftutils, modal
 
 from nonlineq import newton_solve
 
@@ -64,21 +64,24 @@ def proc_glottal_flow_rate(f: sf.StateFile) -> NDArray:
     ]
     return np.array(q)
 
-def proc_voice_output(f: sf.StateFile) -> NDArray:
+def proc_voice_output(f: sf.StateFile, n: int) -> NDArray:
     """
     Return voice outputs (RMS pressure, fundamental frequency)
     """
     t = proc_time(f)
     q = proc_glottal_flow_rate(f)
 
-    # dt = t[1] - t[0]
-    # fund_freq, fund_phase, dfreq, dphase, info = \
-    #     modal.fundamental_mode_from_peaks(q, dt, height=np.max(q)*0.8)
+    dt = t[1] - t[0]
+    fund_freq, fund_phase, dfreq, dphase, info = \
+        modal.fundamental_mode_from_peaks(q, dt, height=np.max(q)*0.8)
+    if len(info['peaks']) < 2:
+        fund_freq = 0.0
 
     prms = calc_prms(t, q)/10
 
+    _voice_output = (prms, fund_freq)
     # voice_output = np.array([prms, fund_freq])
-    voice_output = np.array([prms])
+    voice_output = np.array(_voice_output[:n])
     return voice_output
 
 def calc_prms(t: NDArray, q: NDArray) -> float:
@@ -229,6 +232,7 @@ def make_voice_output_jac(
     ini_state, *_ = make_model_param_from_comp_input(
         model, comp_input, const_control, const_prop, ini_state=ini_state
     )
+
     # Calculate voice output sensitivity to phonation parameters
     # with a FD approximation
     # Populate the voice output sensitivity matrix column-by-column
@@ -236,21 +240,23 @@ def make_voice_output_jac(
     # Use a subglottal pressure change of 5 Pa
     # Use a maximum stiffness change of 500 Pa
     _dinputs = (5 * 10, 500 * 10)
-    dinputs = tuple(_dinput for _dinput, _ in zip(_dinputs, comp_input))
-    voice_output_jac = np.zeros((len(voice_output), len(comp_input)))
-    for j, dx in enumerate(dinputs):
-        # Run a simulation with the incremented comp. inputs to find the change
-        # in voice outputs
-        dinput = np.zeros(len(comp_input))
-        dinput[j] = dx
+    dinputs = list(np.diag(_dinputs))[:len(comp_input)]
+
+    def form_jac_column(dinput):
         with sf.StateFile(model, fpath, mode='w') as f:
             _, solver_info = integrate(
                 model, f, comp_input+dinput, const_control, const_prop, times,
                 ini_state=ini_state
             )
-            voice_output1 = proc_voice_output(f)
+            voice_output1 = proc_voice_output(f, len(comp_input))
 
-        voice_output_jac[:, j] = (voice_output1-voice_output)/dinputs[j]
+        return (voice_output1-voice_output)/np.linalg.norm(dinput)
+
+    voice_output_jac = np.array([
+        form_jac_column(dinput) for dinput in dinputs
+    ])
+
+    print(voice_output_jac)
 
     return voice_output_jac
 
@@ -310,7 +316,7 @@ def compensate(
                 model, f, x, const_control, const_prop, times,
                 ini_state=ini_state
             )
-            y = proc_voice_output(f)
+            y = proc_voice_output(f, len(comp_input_0))
             path_head, path_tail = path.splitext(fpath)
             jac = make_voice_output_jac(
                 model, x, y, const_control, const_prop, times,
@@ -531,7 +537,7 @@ def integrate_vicious_cycle(
         _, solve_info = integrate(
             model, f, comp_input_0, const_control, const_prop, times, ini_state=ini_state
         )
-        voice_target = proc_voice_output(f)
+        voice_target = proc_voice_output(f, len(comp_input_0))
         damage_rate = proc_damage_rate(model, f)
         vd_0 = calc_swelling_rate(damage_rate)
 
@@ -557,7 +563,9 @@ def integrate_vicious_cycle(
         )
 
         with sf.StateFile(model, f'{output_dir}/SwellingStep{n}.h5', mode='r') as f:
-            voice_output = proc_voice_output(f)
+            voice_output = proc_voice_output(f, len(comp_input_0))
+            print(f"Target voice output after compensation: {voice_target}")
+            print(f"Voice output after compensation: {voice_output}")
             damage_rate = proc_damage_rate(model, f)
             vd_1 = calc_swelling_rate(damage_rate)
 
@@ -593,13 +601,14 @@ if __name__ == '__main__':
 
         # This is how long to integrate the 'voicing' simulations for, which
         # are used to determine damage rates, swelling fields, etc.
-        times = 5e-5*np.arange(2**4)
-        # times = 5e-5*np.arange(2**12)
+        # times = 5e-5*np.arange(2**6)
+        # times = 5e-5*np.arange(2**9)
+        times = 5e-5*np.arange(2**12)
 
         # `v0` and `x0` are the initial swelling field and compensatory inputs
         v_0 = np.ones(const_prop['v_swelling'].shape)
-        # x_0 = np.array([0, 0])
-        x_0 = np.array([0])
+        x_0 = np.array([0, 0])
+        # x_0 = np.array([0])
         integrate_vicious_cycle(
             model, v_0, x_0, const_controls[0], const_prop, times,
             n_step=N, v_step=0.1, output_dir='out'
