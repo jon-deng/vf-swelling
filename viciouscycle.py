@@ -175,6 +175,10 @@ def voice_output_jac(
     f0: sf.StateFile
         The statefile corresponding to the linearization point
     """
+    # Compute the swollen initial state once and re-use it
+    ini_state, *_ = make_model_param_from_comp_input(
+        model, x0, const_control, const_prop, ini_state=ini_state
+    )
     # Calculate voice output sensitivity to phonation parameters
     # with a FD approximation
     # times = f0.get_times()
@@ -191,12 +195,10 @@ def voice_output_jac(
         # in voice outputs
         dinput = np.zeros(len(x0))
         dinput[j] = dx
-        ini_state, control1, prop1, _ = make_model_param_from_comp_input(
-            model, x0+dinput, const_control, const_prop, ini_state=ini_state
-        )
         with sf.StateFile(model, 'tmp.h5', mode='w') as f:
-            _, solver_info = forward.integrate(
-                model, f, ini_state, [control1], prop1, times
+            _, solver_info = integrate(
+                model, f, x0+dinput, const_control, const_prop, times,
+                ini_state=ini_state
             )
             voice_output1 = proc_voice_output(f)
 
@@ -316,7 +318,7 @@ def integrate(
         ini_state=ini_state
     )
     return forward.integrate(
-        model, f, ini_state, [control_0], prop_0, times
+        model, f, ini_state, [control_0], prop_0, times, use_tqdm=True
     )
 
 def postprocess_xdmf(
@@ -459,7 +461,7 @@ if __name__ == '__main__':
     })
     model = main.setup_model(param)
 
-    N = 4
+    N = 6
     fpaths = [f'SwellingStep{n}.h5' for n in range(N)]
     if not all(path.isfile(fpath) for fpath in fpaths):
         ini_state, const_controls, const_prop = main.setup_state_control_props(param, model)
@@ -467,7 +469,7 @@ if __name__ == '__main__':
         # This is how long to integrate the 'voicing' simulations for, which
         # are used to determine damage rates, swelling fields, etc.
         times = 5e-5*np.arange(2**4)
-        # times = 5e-5*np.arange(2**12)
+        times = 5e-5*np.arange(2**12)
 
         # `v0` and `x0` are the initial swelling field and compensatory inputs
         v_0 = np.ones(const_prop['v_swelling'].shape)
@@ -475,7 +477,7 @@ if __name__ == '__main__':
         x_0 = np.array([0])
         integrate_vicious_cycle(
             model, v_0, x_0, const_controls[0], const_prop, times,
-            n_step=N, v_step=0.05
+            n_step=N, v_step=0.1
         )
 
     if POSTPROCESS_XDMF:
