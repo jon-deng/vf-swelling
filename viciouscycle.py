@@ -193,7 +193,8 @@ def make_voice_output_jac(
         model: Model, comp_input: NDArray, voice_output: NDArray,
         const_control: bv.BlockVector, const_prop: bv.BlockVector,
         times: NDArray,
-        ini_state: Optional[bv.BlockVector]=None
+        ini_state: Optional[bv.BlockVector]=None,
+        fpath: str='tmp.h5'
     ) -> NDArray:
     """
     Return model parameters needed to achieve target voice outputs
@@ -219,6 +220,10 @@ def make_voice_output_jac(
         If an initial state is not provided, it is calculated such that the
         model is static under the given swelling field and with no external
         loads.
+    fpath: str
+        The path to write simulation files to
+
+        These files are needed to compute the jacobian sensitivity.
     """
     # Compute the swollen initial state once and re-use it
     ini_state, *_ = make_model_param_from_comp_input(
@@ -238,7 +243,7 @@ def make_voice_output_jac(
         # in voice outputs
         dinput = np.zeros(len(comp_input))
         dinput[j] = dx
-        with sf.StateFile(model, 'tmp.h5', mode='w') as f:
+        with sf.StateFile(model, fpath, mode='w') as f:
             _, solver_info = integrate(
                 model, f, comp_input+dinput, const_control, const_prop, times,
                 ini_state=ini_state
@@ -251,7 +256,7 @@ def make_voice_output_jac(
 
 def compensate(
         model: Model,
-        fname: str,
+        fpath: str,
         comp_input_0: NDArray, voice_output_target: NDArray,
         const_control: bv.BlockVector, const_prop: bv.BlockVector,
         times: NDArray,
@@ -264,7 +269,7 @@ def compensate(
     ----------
     model: Model
         The model used to simulate voice outputs
-    fname: str
+    fpath: str
         The path to a file to write the compensatory simulations
 
         This path will be written/rewritten iteratively as the function
@@ -300,15 +305,16 @@ def compensate(
     def lin_subproblem(x):
         # Calculate voice output sensitivity to phonation parameters
         # with a FD approximation
-        with sf.StateFile(model, fname, mode='w') as f:
+        with sf.StateFile(model, fpath, mode='w') as f:
             integrate(
                 model, f, x, const_control, const_prop, times,
                 ini_state=ini_state
             )
             y = proc_voice_output(f)
+            path_head, path_tail = path.splitext(fpath)
             jac = make_voice_output_jac(
                 model, x, y, const_control, const_prop, times,
-                ini_state=ini_state
+                ini_state=ini_state, fpath=f'{path_head}--tmp{path_tail}'
             )
         y1 = voice_output_target
 
@@ -486,7 +492,8 @@ def integrate_vicious_cycle(
         const_control: bv.BlockVector, const_prop: bv.BlockVector,
         times: NDArray,
         n_step: int=1,
-        v_step: float=0.05
+        v_step: float=0.05,
+        output_dir: str='out'
     ):
     """
     Integrate the vicious cycle
@@ -510,6 +517,8 @@ def integrate_vicious_cycle(
         The number of vicious cycle steps to take
     v_step: float
         The increment in swelling to take for each step of the vicious cycle
+    output_dir: str
+        The directory to write results to
     """
     ## Run the zero swelling simulation to establish the compensatory target
     const_prop['v_swelling'] = v_0
@@ -517,7 +526,7 @@ def integrate_vicious_cycle(
         model, comp_input_0, const_control, const_prop, ini_state=None
     )
 
-    with sf.StateFile(model, f'SwellingStep{0}.h5', mode='w') as f:
+    with sf.StateFile(model, f'{output_dir}/SwellingStep{0}.h5', mode='w') as f:
         # Run the simulation for the initial compensatory inputs
         _, solve_info = integrate(
             model, f, comp_input_0, const_control, const_prop, times, ini_state=ini_state
@@ -527,7 +536,7 @@ def integrate_vicious_cycle(
         vd_0 = calc_swelling_rate(damage_rate)
 
     # Loops through steps of the vicious cycle (VC)
-    for n in tqdm(range(1, n_step)):
+    for n in tqdm(range(1, n_step), desc='Vicious cycle'):
         dv = v_step*vd_0/vd_0.max()
         v_1 = v_0 + dv
 
@@ -541,13 +550,13 @@ def integrate_vicious_cycle(
         # inputs required
         x_1, info = compensate(
             model,
-            f'SwellingStep{n}.h5',
+            f'{output_dir}/SwellingStep{n}.h5',
             comp_input_0, voice_target,
             const_control, const_prop,
             times, ini_state=ini_state
         )
 
-        with sf.StateFile(model, f'SwellingStep{n}.h5', mode='r') as f:
+        with sf.StateFile(model, f'{output_dir}/SwellingStep{n}.h5', mode='r') as f:
             voice_output = proc_voice_output(f)
             damage_rate = proc_damage_rate(model, f)
             vd_1 = calc_swelling_rate(damage_rate)
@@ -561,7 +570,7 @@ if __name__ == '__main__':
     import main
     import cases
 
-    POSTPROCESS_XDMF = True
+    POSTPROCESS_XDMF = False
 
     param = main.ExpParam({
         'MeshName': cases.MESH_BASE_NAME, 'clscale': 0.75,
@@ -585,7 +594,7 @@ if __name__ == '__main__':
         # This is how long to integrate the 'voicing' simulations for, which
         # are used to determine damage rates, swelling fields, etc.
         times = 5e-5*np.arange(2**4)
-        times = 5e-5*np.arange(2**12)
+        # times = 5e-5*np.arange(2**12)
 
         # `v0` and `x0` are the initial swelling field and compensatory inputs
         v_0 = np.ones(const_prop['v_swelling'].shape)
@@ -593,7 +602,7 @@ if __name__ == '__main__':
         x_0 = np.array([0])
         integrate_vicious_cycle(
             model, v_0, x_0, const_controls[0], const_prop, times,
-            n_step=N, v_step=0.1
+            n_step=N, v_step=0.1, output_dir='out'
         )
 
     if POSTPROCESS_XDMF:
