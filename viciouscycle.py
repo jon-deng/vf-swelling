@@ -2,14 +2,15 @@ r"""
 This module contains functionality for modelling the vicious cycle
 
 The vicious cycle is modelled by the ODE
-.. math:: \dot{v} = \dot{v}(\dot{\alpha})
+.. math:: \dot{v} = \dot{v}(\dot{\alpha}) ,
 where $\alpha$ is the damage distribution.
 
-Assuming swelling is proportional to damage:
-.. math:: \dot{v} = K \dot{\alpha}
+Assuming swelling is proportional to damage, results in:
+.. math:: \dot{v} = K \dot{\alpha},
+where $K$ is a constant.
 
 Since the rate of damage accumulation depends on the current voicing conditions,
-.. math:: \dot{v} = \dot{\alpha}(p_\mathrm{sub}, E, v, \ellipsis)
+.. math:: \dot{v} \propto \dot{\alpha}(p_\mathrm{sub}, E, v, \ellipsis)
 where $p_\mathrm{sub}$ is the subglottal pressure, $E$ is the vocal fold
 stiffness, and $\ellipsis$ represents any number of additional voicing
 conditions (stiffness, poisson's ratio, etc.).
@@ -18,11 +19,10 @@ Because swelling changes voice outputs, it is likely that compensatory changes
 in voicing conditions ($p_\mathrm{sub}$, $E$ for muscle stiffness) will occur
 to maintain some 'normal' voice output.
 This results in a dependence of some voicing parameters on $v$
-.. math:: \dot{v} = \dot{\alpha}(p_\mathrm{sub}(v), E(v), v, \ellipsis)
-This is the non-linear ODE we assume governs the rate at which swelling occurs.
+.. math:: \dot{v} \propto \dot{\alpha}(p_\mathrm{sub}(v), E(v), v, \ellipsis).
 """
 
-from typing import Any
+from typing import Any, Mapping, Tuple, Optional
 from numpy.typing import NDArray
 
 from tqdm import tqdm
@@ -38,25 +38,52 @@ from femvf.models.transient import coupled
 from blockarray import blockvec as bv
 
 from scipy import signal
-from vfsig import clinical, fftutils, modal
+from vfsig import clinical, fftutils
 
 from nonlineq import newton_solve
 
 Model = coupled.BaseTransientFSIModel
+SolverInfo = Mapping[str, Any]
 
-def proc_time(f):
-        return f.get_times()
+def proc_time(f: sf.StateFile) -> NDArray:
+    """
+    Return the simulation times vector
+    """
+    return f.get_times()
 
-def proc_glottal_flow_rate(f):
-    qs = [
-        np.sum([f.get_state(ii)[f'fluid{n}.q'][0] for n in range(len(f.model.fluids))])
+def proc_glottal_flow_rate(f: sf.StateFile) -> NDArray:
+    """
+    Return the glottal flow rate vector
+    """
+    q = [
+        np.sum([
+            f.get_state(ii)[f'fluid{n}.q'][0]
+            for n in range(len(f.model.fluids))
+        ])
         for ii in range(f.size)
     ]
-    return np.array(qs)
+    return np.array(q)
 
-def proc_prms(t, q):
+def proc_voice_output(f: sf.StateFile) -> NDArray:
     """
-    Return the RMS radiated pressure at 1m using a piston-in-baffle approximation
+    Return voice outputs (RMS pressure, fundamental frequency)
+    """
+    t = proc_time(f)
+    q = proc_glottal_flow_rate(f)
+
+    # dt = t[1] - t[0]
+    # fund_freq, fund_phase, dfreq, dphase, info = \
+    #     modal.fundamental_mode_from_peaks(q, dt, height=np.max(q)*0.8)
+
+    prms = calc_prms(t, q)/10
+
+    # voice_output = np.array([prms, fund_freq])
+    voice_output = np.array([prms])
+    return voice_output
+
+def calc_prms(t: NDArray, q: NDArray) -> float:
+    """
+    Return the RMS radiated pressure at 1 m using a piston-in-baffle approximation
     """
     # t = SIGNALS[f'{case_name}/time']
     # q = SIGNALS[f'{case_name}/q']
@@ -88,26 +115,12 @@ def proc_prms(t, q):
 
     return prms
 
-def proc_voice_output(f: sf.StateFile):
-    t = proc_time(f)
-    q = proc_glottal_flow_rate(f)
-
-    # dt = t[1] - t[0]
-    # fund_freq, fund_phase, dfreq, dphase, info = \
-    #     modal.fundamental_mode_from_peaks(q, dt, height=np.max(q)*0.8)
-
-    prms = proc_prms(t, q)/10
-
-    # voice_output = np.array([prms, fund_freq])
-    voice_output = np.array([prms])
-    return voice_output
-
 
 def make_model_param_from_comp_input(
-        model: Model, x0: NDArray,
+        model: Model, comp_input: NDArray,
         const_control: bv.BlockVector, const_prop: bv.BlockVector,
-        ini_state=None
-    ):
+        ini_state: Optional[bv.BlockVector]=None
+    ) -> Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector, SolverInfo]:
     """
     Return model parameters from compensatory inputs
 
@@ -115,36 +128,52 @@ def make_model_param_from_comp_input(
     ----------
     model: Model
         The model used to simulate voice outputs
-    x0: sf.StateFile
-        The statefile corresponding to the linearization point
-    """
-    # `x0[0]` corresponds to an increment in subglottal pressure
-    control = const_control.copy()
-    nfluid = len(model.fluids)
-    for n in range(nfluid):
-        control[f'fluid{n}.psub'] = const_control.sub[f'fluid{n}.psub'][0] + x0[0]
+    comp_input: NDArray
+        The compensatory input vector
 
+        This is assumed to be in the order:
+        (subglottal pressure, modulus increase).
+    const_control, const_prop: bv.BlockVector
+        Any constant values of the model control and property vectors
+    ini_state: Optional[bv.BlockVector]
+        An optional initial state to return
+
+        If an initial state is not provided, it is calculated such that the
+        model is static under the given swelling field and with no external
+        loads.
+    """
+    # `comp_input[0]` corresponds to an increment in subglottal pressure
+    control = const_control.copy()
+    for n in range(len(model.fluids)):
+        control[f'fluid{n}.psub'] = (
+            const_control.sub[f'fluid{n}.psub'][0] + comp_input[0]
+        )
+
+    # `comp_input[1]` corresponds to changes in elastic modulus
+    # It increments stiffness from the constant distribution
+    # A value of 1 will add a maximum of 1 cgs pressure unit (0.1 Pa) to the
+    # stiffness
     dprop = const_prop.copy()
     dprop[:] = 0
-    if len(x0) > 1:
-        # `x0[1]` corresponds to changes in elastic modulus
-        # It increments stiffness from the constant distribution
-        # A value of 1 will add a maximum of 1 cgs pressure unit (0.1 Pa) to the
-        # stiffness
-        demod = np.array(const_prop.sub['emod'][:])/np.max(const_prop.sub['emod'][:])
-        dprop['emod'][:] = x0[1]*demod
+    if len(comp_input) > 1:
+        demod = const_prop['emod']/np.max(const_prop['emod'])
+        dprop['emod'][:] = comp_input[1]*demod
     prop = const_prop + dprop
 
-    # The initial state is a swollen static state
+    # Compute `ini_state` as a swollen static state without external loading
     if ini_state is None:
         ini_state = model.state0.copy()
         ini_state[:] = 0
+
         model.set_control(control)
         model.set_prop(prop)
         sl_control = model.solid.control.copy()
         sl_prop = model.solid.prop.copy()
+        # Ensure there's no external loading
         sl_control['p'][:] = 0
-        # Use 1 loading step for each 5% swelling
+
+        # Compute the swollen static state
+        # Use 1 loading step for each 5% swelling increase
         vmax = np.max(sl_prop['v_swelling'])
         nload = int(round(1/.05 * vmax))
         static_state, static_solve_info = main.solve_static_swollen_config(
@@ -156,15 +185,16 @@ def make_model_param_from_comp_input(
 
     solve_status = static_solve_info.get('status')
     if solve_status != 0 and solve_status is not None:
-        raise RuntimeError("Uh oh I couldn't find a static swollen state")
+        raise RuntimeError("A static swollen state could not be solved")
 
     return ini_state, control, prop, static_solve_info
 
-def voice_output_jac(
-        model: Model, x0: NDArray, f0: sf.StateFile,
-        const_control, const_prop, times: NDArray,
-        ini_state=None
-    ):
+def make_voice_output_jac(
+        model: Model, comp_input: NDArray, voice_output: NDArray,
+        const_control: bv.BlockVector, const_prop: bv.BlockVector,
+        times: NDArray,
+        ini_state: Optional[bv.BlockVector]=None
+    ) -> NDArray:
     """
     Return model parameters needed to achieve target voice outputs
 
@@ -172,67 +202,97 @@ def voice_output_jac(
     ----------
     model: Model
         The model used to simulate voice outputs
-    f0: sf.StateFile
-        The statefile corresponding to the linearization point
+    comp_input: NDArray
+        The compensatory input vector (linearization point)
+
+        This is assumed to be in the order:
+        (subglottal pressure, modulus increase).
+    voice_output: NDArray
+        The voice otuput at the linearization point
+    const_control, const_prop: bv.BlockVector
+        Any constant values of the model control and property vectors
+    times: NDArray
+        A simulation time vector
+    ini_state: Optional[bv.BlockVector]
+        An optional initial state to return
+
+        If an initial state is not provided, it is calculated such that the
+        model is static under the given swelling field and with no external
+        loads.
     """
     # Compute the swollen initial state once and re-use it
     ini_state, *_ = make_model_param_from_comp_input(
-        model, x0, const_control, const_prop, ini_state=ini_state
+        model, comp_input, const_control, const_prop, ini_state=ini_state
     )
     # Calculate voice output sensitivity to phonation parameters
     # with a FD approximation
-    # times = f0.get_times()
-    voice_output0 = proc_voice_output(f0)
-
     # Populate the voice output sensitivity matrix column-by-column
+    # For the FD increments:
     # Use a subglottal pressure change of 5 Pa
     # Use a maximum stiffness change of 500 Pa
-    dinputs = (5 * 10, 500 * 10)
-    dinputs = (5 * 10,)
-    voice_output_jac = np.zeros((len(voice_output0), len(x0)))
+    _dinputs = (5 * 10, 500 * 10)
+    dinputs = tuple(_dinput for _dinput, _ in zip(_dinputs, comp_input))
+    voice_output_jac = np.zeros((len(voice_output), len(comp_input)))
     for j, dx in enumerate(dinputs):
         # Run a simulation with the incremented comp. inputs to find the change
         # in voice outputs
-        dinput = np.zeros(len(x0))
+        dinput = np.zeros(len(comp_input))
         dinput[j] = dx
         with sf.StateFile(model, 'tmp.h5', mode='w') as f:
             _, solver_info = integrate(
-                model, f, x0+dinput, const_control, const_prop, times,
+                model, f, comp_input+dinput, const_control, const_prop, times,
                 ini_state=ini_state
             )
             voice_output1 = proc_voice_output(f)
 
-        voice_output_jac[:, j] = (voice_output1-voice_output0)/dinputs[j]
+        voice_output_jac[:, j] = (voice_output1-voice_output)/dinputs[j]
 
-    return voice_output0, voice_output_jac
+    return voice_output_jac
 
 def compensate(
         model: Model,
-        target: Any,
-        x_0: NDArray,
         fname: str,
-        const_control, const_prop,
+        comp_input_0: NDArray, voice_output_target: NDArray,
+        const_control: bv.BlockVector, const_prop: bv.BlockVector,
         times: NDArray,
-        ini_state=None
+        ini_state: Optional[bv.BlockVector]=None
     ) -> bv.BlockVector:
     """
-    Return model parameters needed to achieve target voice outputs
+    Return compensatory adjustments needed to achieve target voice outputs
 
     Parameters
     ----------
     model: Model
         The model used to simulate voice outputs
-    target:
-        The target voice outputs
-    fname:
-        The name of the state file to write
+    fname: str
+        The path to a file to write the compensatory simulations
+
+        This path will be written/rewritten iteratively as the function
+        tries to find compensatory inputs that give the target voice output.
+    comp_input_0: NDArray
+        The compensatory input vector (linearization point)
+
+        This is assumed to be in the order:
+        (subglottal pressure, modulus increase).
+    voice_output_target: NDArray
+        The target voice otuputs
+    const_control, const_prop: bv.BlockVector
+        Any constant values of the model control and property vectors
+    times: NDArray
+        A simulation time vector
+    ini_state: Optional[bv.BlockVector]
+        An optional initial state to return
+
+        If an initial state is not provided, it is calculated such that the
+        model is static under the given swelling field and with no external
+        loads.
     """
     # Compute the swollen initial state once so you can reuse it for each
     # simulation
     # ; you only have to compute it once because the swelling magnitude remains
     # constant
     ini_state, *_ = make_model_param_from_comp_input(
-        model, x_0, const_control, const_prop, ini_state=ini_state
+        model, comp_input_0, const_control, const_prop, ini_state=ini_state
     )
 
     # Use an iterative Newton method to find the appropriate compensatory
@@ -245,11 +305,12 @@ def compensate(
                 model, f, x, const_control, const_prop, times,
                 ini_state=ini_state
             )
-            y, jac = voice_output_jac(
-                model, x, f, const_control, const_prop, times,
+            y = proc_voice_output(f)
+            jac = make_voice_output_jac(
+                model, x, y, const_control, const_prop, times,
                 ini_state=ini_state
             )
-        y1 = target
+        y1 = voice_output_target
 
         def assem_res():
             return y1 - y
@@ -259,7 +320,7 @@ def compensate(
 
         return assem_res, assem_jac
 
-    x, info = newton_solve(x_0, lin_subproblem, lambda x: np.linalg.norm(x))
+    x, info = newton_solve(comp_input_0, lin_subproblem, lambda x: np.linalg.norm(x))
 
     return x, info
 
@@ -268,7 +329,7 @@ def proc_damage_rate(
         f: sf.StateFile
     ) -> NDArray:
     """
-    Return the damage accumulation rate
+    Return the damage rate
 
     Parameters
     ----------
@@ -291,7 +352,7 @@ def proc_damage_rate(
     damage = measure(f)
     return damage
 
-def proc_swelling_rate(
+def calc_swelling_rate(
         damage_rate: NDArray
     ) -> NDArray:
     """
@@ -307,13 +368,34 @@ def proc_swelling_rate(
 
 def integrate(
         model: Model, f: sf.StateFile,
-        compensatory_input: NDArray,
+        comp_input: NDArray,
         const_control: bv.BlockVector, const_prop: bv.BlockVector,
         times: NDArray,
         ini_state: bv.BlockVector=None
-    ):
+    ) -> Tuple[bv.BlockVector, SolverInfo]:
+    """
+    Integrate the model over time
+
+    Parameters
+    ----------
+    model: Model
+        The model used to simulate voice outputs
+    comp_input: NDArray
+        The compensatory input vector
+
+        This is assumed to be in the order:
+        (subglottal pressure, modulus increase).
+    const_control, const_prop: bv.BlockVector
+        Any constant values of the model control and property vectors
+    ini_state: Optional[bv.BlockVector]
+        An optional initial state
+
+        If an initial state is not provided, it is calculated such that the
+        model is static under the given swelling field and with no external
+        loads.
+    """
     ini_state, control_0, prop_0, _ = make_model_param_from_comp_input(
-        model, compensatory_input,
+        model, comp_input,
         const_control, const_prop,
         ini_state=ini_state
     )
@@ -322,11 +404,22 @@ def integrate(
     )
 
 def postprocess_xdmf(
-        model, fstate, xdmf_path: str,
+        model: Model, fstate: h5py.File, xdmf_path: str,
         overwrite: bool=False
     ):
     """
-    Write an XDMF file
+    Post-process results to an XDMF file
+
+    Parameters
+    ----------
+    model: Model
+        The model
+    fstate: h5py.File
+        The model time history
+    xdmf_path: str
+        The XDMF file path to write
+    overwrite: bool
+        Whether to overwrite previously written files
     """
     from femvf.vis import xdmfutils
     xdfm_data_dir, xdmf_basename = path.split(xdmf_path)
@@ -389,7 +482,7 @@ def postprocess_xdmf(
 
 def integrate_vicious_cycle(
         model: Model,
-        v_0: NDArray, x_0: NDArray,
+        v_0: NDArray, comp_input_0: NDArray,
         const_control: bv.BlockVector, const_prop: bv.BlockVector,
         times: NDArray,
         n_step: int=1,
@@ -397,47 +490,70 @@ def integrate_vicious_cycle(
     ):
     """
     Integrate the vicious cycle
+
+    Parameters
+    ----------
+    model: Model
+        The model used to simulate voice outputs
+    v_0: NDArray
+        The initial swelling field
+    comp_input_0: NDArray
+        The initial compensatory input vector
+
+        This is assumed to be in the order:
+        (subglottal pressure, modulus increase).
+    const_control, const_prop: bv.BlockVector
+        Any constant values of the model control and property vectors
+    times: NDArray
+        A simulation time vector
+    n_step: int
+        The number of vicious cycle steps to take
+    v_step: float
+        The increment in swelling to take for each step of the vicious cycle
     """
     ## Run the zero swelling simulation to establish the compensatory target
     const_prop['v_swelling'] = v_0
     ini_state, *_, solve_info = make_model_param_from_comp_input(
-        model, x_0, const_control, const_prop, ini_state=None
+        model, comp_input_0, const_control, const_prop, ini_state=None
     )
 
     with sf.StateFile(model, f'SwellingStep{0}.h5', mode='w') as f:
         # Run the simulation for the initial compensatory inputs
         _, solve_info = integrate(
-            model, f, x_0, const_control, const_prop, times, ini_state=ini_state
+            model, f, comp_input_0, const_control, const_prop, times, ini_state=ini_state
         )
         voice_target = proc_voice_output(f)
         damage_rate = proc_damage_rate(model, f)
-        vd_0 = proc_swelling_rate(damage_rate)
+        vd_0 = calc_swelling_rate(damage_rate)
 
     # Loops through steps of the vicious cycle (VC)
     for n in tqdm(range(1, n_step)):
         dv = v_step*vd_0/vd_0.max()
         v_1 = v_0 + dv
+
+        # For the current swelling field, determine the swollen static state
         const_prop['v_swelling'] = v_1
         ini_state, *_, solve_info = make_model_param_from_comp_input(
-            model, x_0, const_control, const_prop, ini_state=None
+            model, comp_input_0, const_control, const_prop, ini_state=None
         )
 
-        # For the current swelling, determine the compensatory change in
+        # For the current swelling field, determine the compensatory change in
         # inputs required
         x_1, info = compensate(
-            model, voice_target, x_0,
+            model,
             f'SwellingStep{n}.h5',
+            comp_input_0, voice_target,
             const_control, const_prop,
-            times
+            times, ini_state=ini_state
         )
 
         with sf.StateFile(model, f'SwellingStep{n}.h5', mode='r') as f:
             voice_output = proc_voice_output(f)
             damage_rate = proc_damage_rate(model, f)
-            vd_1 = proc_swelling_rate(damage_rate)
+            vd_1 = calc_swelling_rate(damage_rate)
 
         # Update variables for next step
-        (x_0, v_0, vd_0) = x_1, v_1, vd_1
+        (comp_input_0, v_0, vd_0) = x_1, v_1, vd_1
 
 if __name__ == '__main__':
     from os import path
