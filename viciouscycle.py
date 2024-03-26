@@ -239,7 +239,7 @@ def make_voice_output_jac(
     # For the FD increments:
     # Use a subglottal pressure change of 5 Pa
     # Use a maximum stiffness change of 500 Pa
-    _dinputs = (5 * 10, 500 * 10)
+    _dinputs = (5 * 10, 1000 * 10)
     dinputs = list(np.diag(_dinputs))[:len(comp_input)]
 
     def form_jac_column(dinput):
