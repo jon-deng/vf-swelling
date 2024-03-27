@@ -194,7 +194,14 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         vcovs = np.array([1.0])
         mcovs = np.array([0.0])
         psubs = np.array([600*10])
-        clscales = np.array([1.0, 0.75, 0.5, 0.25])
+
+        # To double the number of elements, reduce the length scale by
+        # scale the length scale by `2**(-1/3)`
+        # (you want the element volume to be 2 times smaller)
+        # Here, go from fewer to more elements in factors of 2
+        elem_refinement_factor = 2
+        cl_factors = elem_refinement_factor**((-1/3)*np.arange(-1, 4))
+        clscales = np.round(0.75 * cl_factors, decimals=2)
         # If `clscale = 0.75` corresponds to 15 z mesh divisions, then the
         # below scales an appropriate number of mesh divisions for other
         # mesh length scales
