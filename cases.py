@@ -194,7 +194,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         vcovs = np.array([1.0])
         mcovs = np.array([0.0])
         psubs = np.array([600*10])
-        clscales = np.array([1.0, 0.75, 0.5])
+        clscales = np.array([1.0, 0.75, 0.5, 0.25])
         # If `clscale = 0.75` corresponds to 15 z mesh divisions, then the
         # below scales an appropriate number of mesh divisions for other
         # mesh length scales
