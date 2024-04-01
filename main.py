@@ -592,6 +592,24 @@ def get_result_name_to_postprocess(
         ]
         return np.array(qs)
 
+    def proc_q(f: sf.StateFile) -> NDArray:
+        """
+        Return the glottal flow rate vector
+        """
+        num_fluid = len(f.model.fluids)
+
+        # Compute q as a weighted average over all coronal cross-sections
+        qs = np.array(
+            [f.file[f'state/fluid{n}.q'] for n in range(num_fluid)]
+        )
+
+        # Assign full weights to all coronal sections with neighbours and
+        # half-weights to the anterior/posterior coronal sections
+        weights = np.ones(num_fluid)
+        weights[[0, -1]] = 0.5
+        q = np.sum(np.array(qs)[..., 0] * weights[:, None], axis=0)/np.sum(weights)
+        return np.array(q)
+
     result_name_to_postprocess = {
         'time.q': proc_q,
         'time.gw': TimeSeries(proc_gw),
