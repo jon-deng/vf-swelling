@@ -705,8 +705,39 @@ def integrate_vc_step(
     v_1 = v_n + dv
     return v_1, comp_input_n
 
-def resume_integrate_vc():
-    pass
+def resume_integrate_vc(
+        n_start: int, n_stop: int,
+        v_step: float=0.05,
+        output_dir: str='out',
+        base_fname: str='SwellingStep'
+    ):
+    state_fpath_0 = f'{output_dir}/{base_fname}{n_start}.h5'
+    with sf.StateFile(model, state_fpath_0, mode='r') as f:
+        voice_target = proc_voice_output(state_fpath_0, 1)
+        const_ini_state = f.get_state(0)
+        const_control = f.get_control(0)
+        const_prop = f.get_prop()
+        voicing_time = f.get_times()
+
+    ## Loop through steps of the vicious cycle (VC)
+    # comp_input_n = comp_input_0
+    # NOTE: Ideally you should be able to figure out what the compensatory input
+    # was from the initial state file
+    comp_input_0 = np.array([0])
+    for n in tqdm(
+            range(n_start, n_stop+1),
+            desc='Vicious cycle integration'
+        ):
+
+        state_fpath_n = f'{output_dir}/{base_fname}{n}.h5'
+        v_1, comp_input_0 = integrate_vc_step(
+            model, state_fpath_n,
+            v_0, voice_target,
+            const_ini_state, const_control, const_prop, voicing_time,
+            v_step=v_step,
+            comp_input_n=comp_input_0
+        )
+        v_0 = v_1
 
 if __name__ == '__main__':
     from os import path
