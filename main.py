@@ -75,7 +75,7 @@ def setup_model(param: ExpParam) -> Model:
     )
     return model
 
-def setup_state_control_props(
+def setup_state_control_prop(
         params: ExpParam, model: Model
     ) -> Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector]:
     """
@@ -84,7 +84,7 @@ def setup_state_control_props(
     ## Set 'basic' model properties
     # These properties don't include the glottal gap since you may/may not
     # want to modify the glottal gap based on the swelling level
-    prop = setup_basic_props(params, model)
+    prop = setup_basic_prop(params, model)
     model.set_prop(prop)
 
     ## Set the initial state
@@ -114,7 +114,7 @@ def setup_state_control_props(
     controls = setup_controls(params, model)
     return state0, controls, prop
 
-def setup_basic_props(param: ExpParam, model: Model) -> bv.BlockVector:
+def setup_basic_prop(param: ExpParam, model: Model) -> bv.BlockVector:
     """
     Set the properties vector
     """
@@ -155,7 +155,7 @@ def setup_basic_props(param: ExpParam, model: Model) -> bv.BlockVector:
     else:
         raise ValueError(f"Unkown 'ModifyEffect' parameter {param['ModifyEffect']}")
 
-    prop = _set_swelling_props(
+    prop = _set_swelling_prop(
         param, model, prop, cellregion_to_sdof,
         **modify_kwargs
     )
@@ -165,7 +165,7 @@ def setup_basic_props(param: ExpParam, model: Model) -> bv.BlockVector:
         'cover': param['Ecov'],
         'body': param['Ebod']
     }
-    prop = _set_layer_props(prop, emods, cellregion_to_sdof)
+    prop = _set_layer_prop(prop, emods, cellregion_to_sdof)
 
     return prop
 
@@ -193,7 +193,7 @@ def setup_ini_state(param: ExpParam, model: Model, dvcov: float=0.025) -> bv.Blo
     vcov = param['vcov']
     nload = max(int(round((vcov-1)/dvcov)), 1)
 
-    prop = setup_basic_props(param, model)
+    prop = setup_basic_prop(param, model)
     model.set_prop(prop)
 
     static_state, _ = solve_static_swollen_config(
@@ -203,7 +203,7 @@ def setup_ini_state(param: ExpParam, model: Model, dvcov: float=0.025) -> bv.Blo
     state0[['u', 'v', 'a']] = static_state
     return state0
 
-def _set_swelling_props(
+def _set_swelling_prop(
         param: ExpParam,
         model: Model,
         prop: bv.BlockVector,
@@ -300,7 +300,7 @@ def _set_swelling_props(
 
     return prop
 
-def _set_layer_props(
+def _set_layer_prop(
         prop: bv.BlockVector,
         emods: Mapping[str, float],
         cellregion_to_sdof: Mapping[str, NDArray]
@@ -392,7 +392,7 @@ def run(
     out_path = f'{out_dir}/{param.to_str()}.h5'
     if not path.isfile(out_path):
         model = setup_model(param)
-        state0, controls, prop = setup_state_control_props(param, model)
+        state0, controls, prop = setup_state_control_prop(param, model)
         # breakpoint()
 
         dt = param['dt']
@@ -407,6 +407,24 @@ def run(
         print(f"Skipping {out_path} because the file already exists")
 
     return out_path
+
+def proc_glottal_flow_rate(f: sf.StateFile) -> NDArray:
+    """
+    Return the glottal flow rate vector
+    """
+    num_fluid = len(f.model.fluids)
+
+    # Compute q as a weighted average over all coronal cross-sections
+    qs = np.array(
+        [f.file[f'state/fluid{n}.q'] for n in range(num_fluid)]
+    )
+
+    # Assign full weights to all coronal sections with neighbours and
+    # half-weights to the anterior/posterior coronal sections
+    weights = np.ones(num_fluid)
+    weights[[0, -1]] = 0.5
+    q = np.sum(np.array(qs)[..., 0] * weights[:, None], axis=0)/np.sum(weights)
+    return np.array(q)
 
 def postprocess(
         out_fpath: str, in_fpaths: List[str],
@@ -585,35 +603,10 @@ def get_result_name_to_postprocess(
     def proc_time(f):
         return f.get_times()
 
-    def proc_q(f):
-        qs = [
-            np.sum([f.get_state(ii)[f'fluid{n}.q'][0] for n in range(len(f.model.fluids))])
-            for ii in range(f.size)
-        ]
-        return np.array(qs)
-
-    def proc_q(f: sf.StateFile) -> NDArray:
-        """
-        Return the glottal flow rate vector
-        """
-        num_fluid = len(f.model.fluids)
-
-        # Compute q as a weighted average over all coronal cross-sections
-        qs = np.array(
-            [f.file[f'state/fluid{n}.q'] for n in range(num_fluid)]
-        )
-
-        # Assign full weights to all coronal sections with neighbours and
-        # half-weights to the anterior/posterior coronal sections
-        weights = np.ones(num_fluid)
-        weights[[0, -1]] = 0.5
-        q = np.sum(np.array(qs)[..., 0] * weights[:, None], axis=0)/np.sum(weights)
-        return np.array(q)
-
     result_name_to_postprocess = {
-        'time.q': proc_q,
-        'time.gw': TimeSeries(proc_gw),
         'time.t': proc_time,
+        'time.q': proc_glottal_flow_rate,
+        'time.gw': TimeSeries(proc_gw),
         'time.field.p': TimeSeries(slsig.FSIPressure(model)),
 
         'time.savg_viscous_rate': TimeSeries(proc_visc_rate),

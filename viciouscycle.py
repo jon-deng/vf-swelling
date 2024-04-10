@@ -45,6 +45,9 @@ from vfsig import clinical, fftutils, modal
 
 from nonlineq import newton_solve
 
+import main
+from main import proc_glottal_flow_rate
+
 Model = coupled.BaseTransientFSIModel
 SolverInfo = Mapping[str, Any]
 
@@ -53,24 +56,6 @@ def proc_time(f: sf.StateFile) -> NDArray:
     Return the simulation times vector
     """
     return f.get_times()
-
-def proc_glottal_flow_rate(f: sf.StateFile) -> NDArray:
-    """
-    Return the glottal flow rate vector
-    """
-    num_fluid = len(f.model.fluids)
-
-    # Compute q as a weighted average over all coronal cross-sections
-    qs = np.array(
-        [f.file[f'state/fluid{n}.q'] for n in range(num_fluid)]
-    )
-
-    # Assign full weights to all coronal sections with neighbours and
-    # half-weights to the anterior/posterior coronal sections
-    weights = np.ones(num_fluid)
-    weights[[0, -1]] = 0.5
-    q = np.sum(np.array(qs)[..., 0] * weights[:, None], axis=0)/np.sum(weights)
-    return np.array(q)
 
 def proc_voice_output(f: sf.StateFile, n: int) -> NDArray:
     """
@@ -259,7 +244,7 @@ def make_voice_output_jac(
     # For the FD increments:
     # Use a subglottal pressure change of 10 Pa
     # Use a maximum stiffness change of 10 kPa
-    _dinputs = (100 * 10, 10e3 * 10)
+    _dinputs = (20 * 10, 10e3 * 10)
     dinputs = list(np.diag(_dinputs))[:len(comp_input)]
 
     def form_jac_column(dinput):
@@ -285,7 +270,7 @@ def make_voice_output_jac(
 def solve_comp_input(
         model: Model,
         fpath: str,
-        v: NDArray, voice_output_target: NDArray,
+        v: NDArray, voice_target: NDArray,
         const_ini_state: bv.BlockVector, const_control: bv.BlockVector, const_prop: bv.BlockVector,
         times: NDArray,
         comp_input_0: Optional[NDArray]=None
@@ -343,7 +328,7 @@ def solve_comp_input(
                 const_ini_state, const_control, const_prop, times,
                 fpath=f'{path_head}--tmp{path_tail}'
             )
-        y1 = voice_output_target
+        y1 = voice_target
 
         def assem_res():
             return y1 - y
@@ -671,18 +656,16 @@ def integrate_vc_step(
 
     # input `v_n` `comp_input_n` `voice_target` `state_fpath`
     const_prop_n = const_prop.copy()
-    const_prop_n['v_swelling'] = v_n
-
-    ini_state, *_, solve_info = map_vc_input_to_model_input(
-        model,
-        v_n, comp_input_n,
-        const_ini_state, const_control, const_prop_n
-    )
+    # ini_state, *_, solve_info = map_vc_input_to_model_input(
+    #     model,
+    #     v_n, comp_input_n,
+    #     const_ini_state, const_control, const_prop_n
+    # )
 
     comp_input_n, compensation_solver_info = solve_comp_input(
         model, state_fpath_n,
         v_n, voice_target,
-        const_ini_state, const_control, const_prop_n, voicing_time,
+        const_ini_state, const_control, const_prop, voicing_time,
         comp_input_0=comp_input_n
     )
 
@@ -713,11 +696,12 @@ def resume_integrate_vc(
     ):
     state_fpath_0 = f'{output_dir}/{base_fname}{n_start}.h5'
     with sf.StateFile(model, state_fpath_0, mode='r') as f:
-        voice_target = proc_voice_output(state_fpath_0, 1)
+        voice_target = proc_voice_output(f, 1)
         const_ini_state = f.get_state(0)
         const_control = f.get_control(0)
         const_prop = f.get_prop()
         voicing_time = f.get_times()
+    v_0 = const_prop.sub['v_swelling']
 
     ## Loop through steps of the vicious cycle (VC)
     # comp_input_n = comp_input_0
@@ -742,7 +726,6 @@ def resume_integrate_vc(
 if __name__ == '__main__':
     from os import path
 
-    import main
     import cases
 
     parser = ArgumentParser()
@@ -756,7 +739,7 @@ if __name__ == '__main__':
         'DZ': 1.5, 'NZ': 15,
         'Ecov': cases.ECOV, 'Ebod': cases.EBOD,
         'vcov': 1, 'mcov': 0.0,
-        'psub': 600*10,
+        'psub': 200*10,
         'dt': 5e-5, 'tf': 0.50,
         'ModifyEffect': '',
         'SwellingDistribution': 'uniform',
@@ -768,7 +751,7 @@ if __name__ == '__main__':
         'DZ': 1.5, 'NZ': 12,
         'Ecov': cases.ECOV, 'Ebod': cases.EBOD,
         'vcov': 1, 'mcov': 0.0,
-        'psub': 600*10,
+        'psub': 300*10,
         'dt': 5e-5, 'tf': 0.50,
         'ModifyEffect': '',
         'SwellingDistribution': 'uniform',
@@ -788,29 +771,36 @@ if __name__ == '__main__':
             f"Some existing files, {fpaths[1:]}, would be overwritten."
         )
     else:
-        const_ini_state, const_controls, const_prop = main.setup_state_control_props(param, model)
+        const_ini_state, const_controls, const_prop = main.setup_state_control_prop(param, model)
 
         # This is how long to integrate the 'voicing' simulations for, which
         # are used to determine damage rates, swelling fields, etc.
         voicing_time = 5e-5*np.arange(2**3)
-        # times = 5e-5*np.arange(2**6)
         # voicing_time = 5e-5*np.arange(2**8)
-        # times = 5e-5*np.arange(2**10)
-        # times = 5e-5*np.arange(2**13)
-        # times = 5e-5*np.arange(10000+1)
+        # voicing_time = 5e-5*np.arange(2**10)
+        voicing_time = 5e-5*np.arange(2**11)
+        # voicing_time = 5e-5*np.arange(2**13)
 
         # `v0` and `x0` are the initial swelling field and compensatory inputs
         v_0 = np.ones(const_prop['v_swelling'].shape)
         x_0 = np.array([0, 0])
         x_0 = np.array([0])
-        integrate_vc(
-            model,
-            v_0, None,
-            const_ini_state, const_controls[0], const_prop, voicing_time,
-            n_start=N_START, n_stop=N_STOP,
-            v_step=0.05, output_dir=cmd_args.output_dir,
-            comp_input_0=x_0
-        )
+
+        if N_START == 0:
+            integrate_vc(
+                model,
+                v_0, None,
+                const_ini_state, const_controls[0], const_prop, voicing_time,
+                n_start=N_START, n_stop=N_STOP,
+                v_step=0.05, output_dir=cmd_args.output_dir,
+                base_fname='SwellingStep',
+                comp_input_0=x_0
+            )
+        else:
+            resume_integrate_vc(
+                N_START, N_STOP, v_step=0.05, output_dir=cmd_args.output_dir,
+                base_fname='SwellingStep'
+            )
 
     if cmd_args.export_xdmf:
         for fpath in fpaths:
