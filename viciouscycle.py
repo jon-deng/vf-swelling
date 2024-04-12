@@ -582,7 +582,7 @@ def integrate_vc(
             desc='Vicious cycle integration'
         ):
 
-        state_fpath_n = f'{output_dir}/{base_fname}{n-1}.h5'
+        state_fpath_n = f'{output_dir}/{base_fname}{n}.h5'
         v_1, comp_input_0 = integrate_vc_step(
             model, state_fpath_n,
             v_0, voice_target,
@@ -751,7 +751,7 @@ if __name__ == '__main__':
         'DZ': 1.5, 'NZ': 12,
         'Ecov': cases.ECOV, 'Ebod': cases.EBOD,
         'vcov': 1, 'mcov': 0.0,
-        'psub': 300*10,
+        'psub': 400*10,
         'dt': 5e-5, 'tf': 0.50,
         'ModifyEffect': '',
         'SwellingDistribution': 'uniform',
@@ -759,8 +759,8 @@ if __name__ == '__main__':
     })
     model = main.setup_model(param)
 
-    N_START = 0
-    N_STOP = 4
+    N_START = 3
+    N_STOP = 9
     fpaths = [
         f'{cmd_args.output_dir}/SwellingStep{n}.h5'
         for n in range(N_START, N_STOP+1)
