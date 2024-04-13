@@ -79,7 +79,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         'DZ': 1.5, 'NZ': 15,
         'Ecov': ECOV, 'Ebod': EBOD,
         'vcov': 1, 'mcov': 0.0,
-        'psub': 300*10,
+        'psub': 400*10,
         'dt': 5e-5, 'tf': 0.50,
         'ModifyEffect': '',
         'SwellingDistribution': 'uniform',
@@ -230,7 +230,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
 
         vcovs = np.array([1.0])
         mcovs = np.array([0.0, -0.8, -1.6])
-        psubs = np.array([300*10, 310*10])
+        psubs = np.array([400*10, 410*10])
         damage_measures = [
             'field.tavg_viscous_rate',
             # 'field.tavg_strain_energy'
