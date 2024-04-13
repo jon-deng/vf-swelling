@@ -345,6 +345,37 @@ def solve_static_swollen_config(
         model: Model,
         control: bv.BlockVector,
         prop: bv.BlockVector,
+        nload: int=1,
+        static_state_0: Optional[bv.BlockVector]=None
+    ):
+    """
+    Solve for the static swollen configuration
+
+    This uses `nload` loading steps of the swelling field
+    """
+    # First, try to directly solve for the static swollen config from
+    # the supplied initial guess, `static_state_0`
+    # If this doesn't work run incremental changes in the swelling field to find
+    # the static swollen configuration
+    if static_state_0 is not None:
+        static_state_n, info = static.static_solid_configuration(
+            model, control, prop, state=static_state_0
+        )
+        solve_success = info['status']
+    else:
+        solve_success = -1
+
+    if solve_success != 0:
+        print("Solved with step system")
+        static_state_n, info = solve_static_swollen_config_stepped(
+            model, control, prop, nload=nload
+        )
+    return static_state_n, info
+
+def solve_static_swollen_config_stepped(
+        model: Model,
+        control: bv.BlockVector,
+        prop: bv.BlockVector,
         nload: int=1
     ):
     """
@@ -365,14 +396,14 @@ def solve_static_swollen_config(
     v_0[:] = 1
     dv = (v_final-v_0)/nload
 
-    props_n = prop.copy()
-    props_n['v_swelling'][:] = v_0
+    prop_n = prop.copy()
+    prop_n['v_swelling'][:] = v_0
 
     info = {}
     for n in range(nload+1):
-        props_n['v_swelling'][:] = v_0 + n*dv
+        prop_n['v_swelling'][:] = v_0 + n*dv
         static_state_n, info = static.static_solid_configuration(
-            model, control, props_n, state=static_state_n
+            model, control, prop_n, state=static_state_n
         )
     return static_state_n, info
 
