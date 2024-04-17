@@ -76,7 +76,7 @@ def setup_model(param: ExpParam) -> Model:
     return model
 
 def setup_state_control_prop(
-        params: ExpParam, model: Model, dv: float=0.025
+        params: ExpParam, model: Model, dv: float=0.01
     ) -> Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector]:
     """
     Return a (state, controls, prop) tuple defining a transient run
@@ -182,7 +182,7 @@ def setup_controls(param: ExpParam, model: Model) -> bv.BlockVector:
 
     return [control]
 
-def setup_ini_state(param: ExpParam, model: Model, dv: float=0.025) -> bv.BlockVector:
+def setup_ini_state(param: ExpParam, model: Model, dv: float=0.01) -> bv.BlockVector:
     """
     Set the initial state vector
     """
@@ -687,23 +687,9 @@ if __name__ == '__main__':
     parser.add_argument("--overwrite-results", type=str, action='extend', nargs='+')
     # parser.add_argument("--default-dt", type=float, default=1.25e-5)
     # parser.add_argument("--default-tf", type=float, default=0.5)
+    parser.add_argument("--postprocess", action='store_true', default=False)
     parser.add_argument("--export-xdmf", action='store_true', default=False)
     clargs = parser.parse_args()
-
-    # TF = clargs.default_tf
-    # DT = clargs.default_dt
-
-    postprocess = functools.partial(
-        postprocess, overwrite_results=clargs.overwrite_results
-    )
-
-    # Pack up the emod arguments to a dict format
-    # _emods = np.array([[2.5, 5.0]]) * 1e3 * 10
-    # layer_labels = ['cover', 'body']
-    # EMODS = [
-    #     {label: value for label, value in zip(layer_labels, layer_values)}
-    #     for layer_values in _emods
-    # ]
 
     ## Run and postprocess simulations
     out_dir = clargs.output_dir
@@ -717,8 +703,13 @@ if __name__ == '__main__':
     else:
         in_fpaths = [run(params, out_dir) for params in param_dicts]
 
-    out_fpath = f'{out_dir}/postprocess.h5'
-    postprocess(out_fpath, in_fpaths, num_proc=clargs.num_proc)
+    if clargs.postprocess:
+        postprocess = functools.partial(
+            postprocess, overwrite_results=clargs.overwrite_results
+        )
+
+        out_fpath = f'{out_dir}/postprocess.h5'
+        postprocess(out_fpath, in_fpaths, num_proc=clargs.num_proc)
 
     if clargs.export_xdmf:
         for param in params:
