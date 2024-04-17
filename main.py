@@ -76,7 +76,7 @@ def setup_model(param: ExpParam) -> Model:
     return model
 
 def setup_state_control_prop(
-        params: ExpParam, model: Model
+        params: ExpParam, model: Model, dv: float=0.025
     ) -> Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector]:
     """
     Return a (state, controls, prop) tuple defining a transient run
@@ -89,7 +89,7 @@ def setup_state_control_prop(
 
     ## Set the initial state
     # The initial state is based on the post-swelling static configuration
-    state0 = setup_ini_state(params, model)
+    state0 = setup_ini_state(params, model, dv=dv)
 
     # Set the glottal gap based on the post-swelling static configuration
     ndim = model.solid.residual.mesh().topology().dim()
@@ -182,7 +182,7 @@ def setup_controls(param: ExpParam, model: Model) -> bv.BlockVector:
 
     return [control]
 
-def setup_ini_state(param: ExpParam, model: Model, dvcov: float=0.025) -> bv.BlockVector:
+def setup_ini_state(param: ExpParam, model: Model, dv: float=0.025) -> bv.BlockVector:
     """
     Set the initial state vector
     """
@@ -190,15 +190,27 @@ def setup_ini_state(param: ExpParam, model: Model, dvcov: float=0.025) -> bv.Blo
     state0[:] = 0.0
     model.solid.control[:] = 0.0
 
-    vcov = param['vcov']
-    nload = max(int(round((vcov-1)/dvcov)), 1)
-
     prop = setup_basic_prop(param, model)
     model.set_prop(prop)
 
-    static_state, _ = solve_static_swollen_config(
+    vcov = param['vcov']
+    nload = max(int(round((vcov-1)/dv)), 1)
+
+    static_state, solve_info = solve_static_swollen_config(
         model.solid, model.solid.control, model.solid.prop, nload
     )
+
+    num_loading_steps = solve_info.get('num_loading_steps', None)
+    if num_loading_steps is not None:
+        final_solve_info = solve_info[f'LoadingStep{num_loading_steps}']
+    else:
+        final_solve_info = solve_info
+
+    if final_solve_info['status'] != 0:
+        raise RuntimeError(
+            "Static state couldn't be solved with solver info: "
+            f"{solve_info}"
+        )
 
     state0[['u', 'v', 'a']] = static_state
     return state0
@@ -391,19 +403,20 @@ def solve_static_swollen_config_stepped(
         static_state_n[:] = 0
 
     v_final = prop['v_swelling'][:].copy()
-    v_0 = v_final.copy()
-    v_0[:] = 1
-    dv = (v_final-v_0)/nload
+    dv = (v_final-1.0)/nload
 
     prop_n = prop.copy()
-    prop_n['v_swelling'][:] = v_0
+    prop_n['v_swelling'][:] = 1.0
 
-    info = {}
+    info = {
+        'num_loading_steps': nload
+    }
     for n in range(nload+1):
-        prop_n['v_swelling'][:] = v_0 + n*dv
-        static_state_n, info = static.static_solid_configuration(
+        prop_n['v_swelling'][:] = 1.0 + n*dv
+        static_state_n, solve_info_n = static.static_solid_configuration(
             model, control, prop_n, state=static_state_n
         )
+        info[f'LoadingStep{n}'] = solve_info_n
     return static_state_n, info
 
 
