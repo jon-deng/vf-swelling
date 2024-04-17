@@ -45,7 +45,11 @@ PARAM_SPEC = {
     'SwellingModel': str
 }
 
-ExpParam = exputils.make_parameters(PARAM_SPEC)
+PARAM_FORMAT_STRS = {
+    'vcov': '.4e'
+}
+
+ExpParam = exputils.make_parameters(PARAM_SPEC, PARAM_FORMAT_STRS)
 
 def make_exp_params(study_name: str) -> List[ExpParam]:
     DEFAULT_PARAM_2D = ExpParam({
