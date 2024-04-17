@@ -366,7 +366,6 @@ def solve_static_swollen_config(
         solve_success = -1
 
     if solve_success != 0:
-        print("Solved with step system")
         static_state_n, info = solve_static_swollen_config_stepped(
             model, control, prop, nload=nload
         )
