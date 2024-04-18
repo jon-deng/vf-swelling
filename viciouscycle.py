@@ -23,12 +23,13 @@ target voice condition $f_\mathrm{target}$.
 .. math:: \dot{v} \propto \dot{\alpha}(p_\mathrm{sub}(v, f_\mathrm{target}), E(v, f_\mathrm{target}), v, \ellipsis).
 """
 
-from typing import Any, Mapping, Tuple, Optional, Union
+from typing import Any, Mapping, Tuple, Optional, Union, List
 from numpy.typing import NDArray
 
 from tqdm import tqdm
 from argparse import ArgumentParser
 import warnings
+import functools
 
 import numpy as np
 import dolfin as dfn
@@ -45,17 +46,21 @@ from vfsig import clinical, fftutils, modal
 
 from nonlineq import newton_solve
 
+from exputils import postprocutils
+
 import main
 from main import proc_glottal_flow_rate
 
 Model = coupled.BaseTransientFSIModel
 SolverInfo = Mapping[str, Any]
 
+
 def proc_time(f: sf.StateFile) -> NDArray:
     """
     Return the simulation time vector
     """
     return f.get_times()
+
 
 def proc_voice_output(f: sf.StateFile, n: int) -> NDArray:
     """
@@ -64,23 +69,25 @@ def proc_voice_output(f: sf.StateFile, n: int) -> NDArray:
     t = proc_time(f)
     q = proc_glottal_flow_rate(f)
 
-     # Truncate part of the flow rate signal to a steady state portion
-    idx_trunc = slice(t.size//2, t.size)
+    # Truncate part of the flow rate signal to a steady state portion
+    idx_trunc = slice(t.size // 2, t.size)
     t_trunc = t[idx_trunc]
     q_trunc = q[idx_trunc]
 
     dt = t[1] - t[0]
-    fund_freq, fund_phase, dfreq, dphase, info = \
-        modal.fundamental_mode_from_peaks(q, dt, height=np.max(q)*0.8)
+    fund_freq, fund_phase, dfreq, dphase, info = modal.fundamental_mode_from_peaks(
+        q, dt, height=np.max(q) * 0.8
+    )
     if len(info['peaks']) < 2:
         fund_freq = 0.0
 
-    prms = calc_prms(t_trunc, q_trunc)/10
+    prms = calc_prms(t_trunc, q_trunc) / 10
 
     _voice_output = (prms, fund_freq)
     # voice_output = np.array([prms, fund_freq])
     voice_output = np.array(_voice_output[:n])
     return voice_output
+
 
 def calc_prms(t: NDArray, q: NDArray) -> float:
     """
@@ -88,7 +95,7 @@ def calc_prms(t: NDArray, q: NDArray) -> float:
     """
     # t = SIGNALS[f'{case_name}/time']
     # q = SIGNALS[f'{case_name}/q']
-    dt = t[1]-t[0]
+    dt = t[1] - t[0]
 
     # Assume a 2cm vocal fold length
     # This is needed to get a true flow rate since the 1D model flow rate
@@ -98,28 +105,26 @@ def calc_prms(t: NDArray, q: NDArray) -> float:
         'theta': 0.0,
         'a': 1.0,
         'rho': 0.001225,
-        'c': 343*100
+        'c': 343 * 100,
     }
     VF_LENGTH = 2
     win = signal.windows.tukey(q.size, alpha=0.15)
-    wq = win*q*VF_LENGTH
+    wq = win * q * VF_LENGTH
     fwq = np.fft.rfft(wq)
     freq = np.fft.rfftfreq(wq.size, d=dt)
 
-    fwp = clinical.prad_piston(fwq, f=freq*2*np.pi, piston_params=piston_params)
+    fwp = clinical.prad_piston(fwq, f=freq * 2 * np.pi, piston_params=piston_params)
 
     # This computes the squared sound pressure
     psqr = fftutils.power_from_rfft(fwp, fwp, n=fwq.size)
 
     # The rms pressure in units of Pa
-    prms = np.sqrt(psqr/fwp.size)
+    prms = np.sqrt(psqr / fwp.size)
 
     return prms
 
-def proc_damage_rate(
-        model: Model,
-        f: sf.StateFile
-    ) -> NDArray:
+
+def proc_damage_rate(model: Model, f: sf.StateFile) -> NDArray:
     """
     Return the damage rate
 
@@ -134,19 +139,17 @@ def proc_damage_rate(
     dx = model.solid.residual.measure('dx')
     mesh = model.solid.residual.mesh()
     fspace = dfn.FunctionSpace(mesh, 'DG', 0)
-    state_measure = slsig.ViscousDissipationField(
-        model, dx=dx, fspace=fspace
-    )
+    state_measure = slsig.ViscousDissipationField(model, dx=dx, fspace=fspace)
+
     def measure(f):
-        mean = TimeSeriesStats(state_measure).mean(f, range(f.size//2, f.size))
+        mean = TimeSeriesStats(state_measure).mean(f, range(f.size // 2, f.size))
         return mean
 
     damage = measure(f)
     return damage
 
-def calc_swelling_rate(
-        damage_rate: NDArray
-    ) -> NDArray:
+
+def calc_swelling_rate(damage_rate: NDArray) -> NDArray:
     """
     Return the swelling rate
 
@@ -158,13 +161,15 @@ def calc_swelling_rate(
     K = 1.0
     return K * damage_rate
 
+
 def map_vc_input_to_model_input(
-        model: Model,
-        v: NDArray, comp_input: NDArray,
-        const_ini_state: bv.BlockVector,
-        const_control: bv.BlockVector,
-        const_prop: bv.BlockVector
-    ) -> Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector, SolverInfo]:
+    model: Model,
+    v: NDArray,
+    comp_input: NDArray,
+    const_ini_state: bv.BlockVector,
+    const_control: bv.BlockVector,
+    const_prop: bv.BlockVector,
+) -> Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector, SolverInfo]:
     """
     Return model inputs from vicious cycle inputs
 
@@ -198,8 +203,8 @@ def map_vc_input_to_model_input(
     dprop = const_prop.copy()
     dprop[:] = 0
     if len(comp_input) > 1:
-        demod = const_prop['emod']/np.max(const_prop['emod'])
-        dprop['emod'][:] = comp_input[1]*demod
+        demod = const_prop['emod'] / np.max(const_prop['emod'])
+        dprop['emod'][:] = comp_input[1] * demod
     prop = const_prop + dprop
 
     prop['v_swelling'][:] = v
@@ -218,27 +223,42 @@ def map_vc_input_to_model_input(
     # Compute the swollen static state
     # Use 1 loading step for each 5% swelling increase
     vmax = np.max(sl_prop['v_swelling'])
-    nload = int(round(1/.05 * vmax))
+    nload = int(round(1 / 0.01 * vmax))
     static_state, static_solve_info = main.solve_static_swollen_config(
-        model.solid, sl_control, sl_prop,
-        nload=nload, static_state_0=const_ini_state[['u', 'v', 'a']]
+        model.solid,
+        sl_control,
+        sl_prop,
+        nload=nload,
+        static_state_0=const_ini_state[['u', 'v', 'a']],
     )
-    ini_state[['u', 'v', 'a']] = static_state
 
-    solve_status = static_solve_info.get('status')
-    if solve_status != 0 and solve_status is not None:
-        raise RuntimeError("A static swollen state could not be solved")
+    num_loading_steps = static_solve_info.get('num_loading_steps', None)
+    if num_loading_steps is not None:
+        final_solve_info = static_solve_info[f'LoadingStep{num_loading_steps}']
+    else:
+        final_solve_info = static_solve_info
+
+    if final_solve_info['status'] != 0:
+        raise RuntimeError(
+            "Static state couldn't be solved with solver info: " f"{static_solve_info}"
+        )
+
+    ini_state[['u', 'v', 'a']] = static_state
 
     return ini_state, control, prop, static_solve_info
 
+
 def make_voice_output_jac(
-        model: Model,
-        voice_output_0: NDArray,
-        v: NDArray, comp_input: NDArray,
-        const_ini_state: bv.BlockVector, const_control: bv.BlockVector, const_prop: bv.BlockVector,
-        voicing_time: NDArray,
-        fpath: str='tmp.h5'
-    ) -> NDArray:
+    model: Model,
+    voice_output_0: NDArray,
+    v: NDArray,
+    comp_input: NDArray,
+    const_ini_state: bv.BlockVector,
+    const_control: bv.BlockVector,
+    const_prop: bv.BlockVector,
+    voicing_time: NDArray,
+    fpath: str = 'tmp.h5',
+) -> NDArray:
     """
     Return model parameters needed to achieve target voice outputs
 
@@ -272,9 +292,7 @@ def make_voice_output_jac(
     """
     # Compute the swollen initial state once and re-use it
     ini_state, *_ = map_vc_input_to_model_input(
-        model,
-        v, comp_input,
-        const_ini_state, const_control, const_prop
+        model, v, comp_input, const_ini_state, const_control, const_prop
     )
 
     # Calculate voice output sensitivity to phonation parameters
@@ -284,35 +302,42 @@ def make_voice_output_jac(
     # Use a subglottal pressure change of 10 Pa
     # Use a maximum stiffness change of 10 kPa
     _dinputs = (10 * 10, 10e3 * 10)
-    dinputs = list(np.diag(_dinputs))[:len(comp_input)]
+    dinputs = list(np.diag(_dinputs))[: len(comp_input)]
 
     def form_jac_column(dinput):
         with sf.StateFile(model, fpath, mode='w') as f:
             _, solver_info = integrate(
-                model, f,
-                v, comp_input+dinput,
-                ini_state, const_control, const_prop, voicing_time
+                model,
+                f,
+                v,
+                comp_input + dinput,
+                ini_state,
+                const_control,
+                const_prop,
+                voicing_time,
             )
             voice_output1 = proc_voice_output(f, len(comp_input))
 
-        return (voice_output1-voice_output_0)/np.linalg.norm(dinput)
+        return (voice_output1 - voice_output_0) / np.linalg.norm(dinput)
 
-    voice_output_jac = np.array([
-        form_jac_column(dinput) for dinput in dinputs
-    ])
+    voice_output_jac = np.array([form_jac_column(dinput) for dinput in dinputs])
 
     # print(voice_output_jac)
 
     return voice_output_jac
 
+
 def solve_comp_input(
-        model: Model,
-        fpath: str,
-        v: NDArray, voice_target: NDArray,
-        const_ini_state: bv.BlockVector, const_control: bv.BlockVector, const_prop: bv.BlockVector,
-        voicing_time: NDArray,
-        comp_input_0: Optional[NDArray]=None
-    ) -> Tuple[bv.BlockVector, SolverInfo]:
+    model: Model,
+    fpath: str,
+    v: NDArray,
+    voice_target: NDArray,
+    const_ini_state: bv.BlockVector,
+    const_control: bv.BlockVector,
+    const_prop: bv.BlockVector,
+    voicing_time: NDArray,
+    comp_input_0: Optional[NDArray] = None,
+) -> Tuple[bv.BlockVector, SolverInfo]:
     """
     Return compensatory adjustments needed to achieve target voice outputs
 
@@ -344,9 +369,7 @@ def solve_comp_input(
     # ; you only have to compute it once because the swelling magnitude remains
     # constant
     ini_state, *_ = map_vc_input_to_model_input(
-        model,
-        v, comp_input_0,
-        const_ini_state, const_control, const_prop
+        model, v, comp_input_0, const_ini_state, const_control, const_prop
     )
 
     # Use an iterative Newton method to find the appropriate compensatory
@@ -356,16 +379,20 @@ def solve_comp_input(
         # with a FD approximation
         with sf.StateFile(model, fpath, mode='w') as f:
             integrate(
-                model, f,
-                v, x, ini_state, const_control, const_prop, voicing_time
+                model, f, v, x, ini_state, const_control, const_prop, voicing_time
             )
             y = proc_voice_output(f, len(comp_input_0))
             path_head, path_tail = path.splitext(fpath)
             jac = make_voice_output_jac(
-                model, y,
-                v, x,
-                ini_state, const_control, const_prop, voicing_time,
-                fpath=f'{path_head}--tmp{path_tail}'
+                model,
+                y,
+                v,
+                x,
+                ini_state,
+                const_control,
+                const_prop,
+                voicing_time,
+                fpath=f'{path_head}--tmp{path_tail}',
             )
         y1 = voice_target
 
@@ -378,32 +405,34 @@ def solve_comp_input(
         return assem_res, assem_jac
 
     comp_input, info = newton_solve(
-        comp_input_0, lin_subproblem, lambda x: np.linalg.norm(x),
+        comp_input_0,
+        lin_subproblem,
+        lambda x: np.linalg.norm(x),
         params={
             'absolute_tolerance': 1e-4,
             'relative_tolerance': 1e-8,
-            'maximum_iterations': 10
-        }
+            'maximum_iterations': 10,
+        },
     )
 
     if info['status'] != 0:
         raise RuntimeError(
-            "Couldn't find compensatory input!"
-            "Solver failed with info: "
-            f"{info}"
+            "Couldn't find compensatory input!" "Solver failed with info: " f"{info}"
         )
 
     return comp_input, info
 
 
 def integrate(
-        model: Model, f: sf.StateFile,
-        v: NDArray, comp_input: NDArray,
-        const_ini_state: bv.BlockVector,
-        const_control: bv.BlockVector,
-        const_prop: bv.BlockVector,
-        voicing_time: NDArray
-    ) -> Tuple[bv.BlockVector, SolverInfo]:
+    model: Model,
+    f: sf.StateFile,
+    v: NDArray,
+    comp_input: NDArray,
+    const_ini_state: bv.BlockVector,
+    const_control: bv.BlockVector,
+    const_prop: bv.BlockVector,
+    voicing_time: NDArray,
+) -> Tuple[bv.BlockVector, SolverInfo]:
     """
     Integrate the model over time
 
@@ -424,17 +453,20 @@ def integrate(
         A simulation time vector
     """
     ini_state, control, prop, _ = map_vc_input_to_model_input(
-        model, v, comp_input,
-        const_ini_state, const_control, const_prop
+        model, v, comp_input, const_ini_state, const_control, const_prop
     )
     return forward.integrate(
         model, f, ini_state, [control], prop, voicing_time, use_tqdm=True
     )
 
+
 def postprocess_xdmf(
-        model: Model, fstate: h5py.File, xdmf_path: str,
-        overwrite: bool=False
-    ):
+    model: Model,
+    fstate: h5py.File,
+    fpost: h5py.File,
+    xdmf_path: str,
+    overwrite: bool = False,
+):
     """
     Post-process results to an XDMF file
 
@@ -450,6 +482,7 @@ def postprocess_xdmf(
         Whether to overwrite previously written files
     """
     from femvf.vis import xdmfutils
+
     xdfm_data_dir, xdmf_basename = path.split(xdmf_path)
     xdmf_data_basename = f'{path.splitext(xdmf_basename)[0]}.h5'
     xdmf_data_path = path.join(xdfm_data_dir, xdmf_data_basename)
@@ -457,9 +490,7 @@ def postprocess_xdmf(
     # Export mesh values
     _labels = ['mesh/solid', 'time']
     labels = _labels
-    datasets = [
-        fstate[label] for label in _labels
-    ]
+    datasets = [fstate[label] for label in _labels]
     formats = [None, None]
 
     mesh = model.solid.residual.mesh()
@@ -467,7 +498,7 @@ def postprocess_xdmf(
     _labels = ['state/u', 'state/v', 'state/a']
     labels += _labels
     datasets += [fstate[label] for label in _labels]
-    formats += len(_labels)*[function_space]
+    formats += len(_labels) * [function_space]
 
     function_space = dfn.FunctionSpace(mesh, 'DG', 0)
     _labels = ['properties/v_swelling']
@@ -475,51 +506,67 @@ def postprocess_xdmf(
     datasets += [fstate[f'{label}'] for label in _labels]
     formats += [function_space]
 
+    _labels = [
+        'field.tmax_strain_energy',
+        'field.tavg_strain_energy',
+        'field.tavg_viscous_rate',
+    ]
+    labels += _labels
+    datasets += [fpost[f'{label}'] for label in _labels]
+    formats += len(_labels) * [function_space]
+
     with h5py.File(xdmf_data_path, mode='w') as fxdmf:
-        xdmfutils.export_mesh_values(
-            datasets, formats, fxdmf, output_names=labels
-        )
+        xdmfutils.export_mesh_values(datasets, formats, fxdmf, output_names=labels)
 
         # Annotate the mesh values with an XDMF file
         static_dataset_descrs = [
             (fxdmf['state/u'], 'vector', 'node'),
-            (fxdmf['properties/v_swelling'], 'scalar', 'Cell')
+            (fxdmf['properties/v_swelling'], 'scalar', 'Cell'),
+            (fxdmf['field.tavg_strain_energy'], 'scalar', 'Cell'),
+            (fxdmf['field.tmax_strain_energy'], 'scalar', 'Cell'),
+            (fxdmf['field.tavg_viscous_rate'], 'scalar', 'Cell'),
         ]
         static_idxs = [
-            (0, ...), (slice(None),),
-            (slice(None),)
+            (0, ...),
+            (slice(None),),
+            (slice(None),),
+            (slice(None),),
+            (slice(None),),
         ]
 
         temporal_dataset_descrs = [
             (fxdmf['state/u'], 'vector', 'node'),
             (fxdmf['state/v'], 'vector', 'node'),
-            (fxdmf['state/a'], 'vector', 'node')
+            (fxdmf['state/a'], 'vector', 'node'),
         ]
-        temporal_idxs = len(temporal_dataset_descrs)*[
-            (slice(None),)
-        ]
+        temporal_idxs = len(temporal_dataset_descrs) * [(slice(None),)]
 
         xdmfutils.write_xdmf(
             fxdmf['mesh/solid'],
-            static_dataset_descrs, static_idxs,
+            static_dataset_descrs,
+            static_idxs,
             fxdmf['time'],
-            temporal_dataset_descrs, temporal_idxs,
-            xdmf_path
+            temporal_dataset_descrs,
+            temporal_idxs,
+            xdmf_path,
         )
 
 
 def integrate_vc(
-        model: Model,
-        v_0: NDArray, voice_target: Union[NDArray, None],
-        const_ini_state: bv.BlockVector,
-        const_control: bv.BlockVector,
-        const_prop: bv.BlockVector,
-        voicing_time: NDArray,
-        n_start: int=0, n_stop: int=1, v_step: float=0.05,
-        comp_input_0: Optional[NDArray]=None,
-        output_dir: str='out',
-        base_fname: str='SwellingStep'
-    ):
+    model: Model,
+    v_0: NDArray,
+    voice_target: Union[NDArray, None],
+    const_ini_state: bv.BlockVector,
+    const_control: bv.BlockVector,
+    const_prop: bv.BlockVector,
+    voicing_time: NDArray,
+    n_start: int = 0,
+    n_stop: int = 1,
+    v_step: float = 0.05,
+    comp_input_0: Optional[NDArray] = None,
+    output_dir: str = 'out',
+    base_fname: str = 'SwellingStep',
+):
     """
     Integrate the vicious cycle
 
@@ -563,37 +610,47 @@ def integrate_vc(
         state_fpath_0 = f'{output_dir}/{base_fname}{n_start}.h5'
         with sf.StateFile(model, state_fpath_0, mode='w') as f:
             _, solve_info = integrate(
-                model, f, v_0, comp_input_0,
-                const_ini_state, const_control, const_prop, voicing_time
+                model,
+                f,
+                v_0,
+                comp_input_0,
+                const_ini_state,
+                const_control,
+                const_prop,
+                voicing_time,
             )
             voice_target = proc_voice_output(f, len(comp_input_0))
 
     ## Loop through steps of the vicious cycle (VC)
     # comp_input_n = comp_input_0
-    for n in tqdm(
-            range(n_start, n_stop+1),
-            desc='Vicious cycle integration'
-        ):
+    for n in tqdm(range(n_start, n_stop), desc='Vicious cycle integration'):
 
         state_fpath_n = f'{output_dir}/{base_fname}{n}.h5'
         v_1, comp_input_0 = integrate_vc_step(
-            model, state_fpath_n,
-            v_0, voice_target,
-            const_ini_state, const_control, const_prop, voicing_time,
+            model,
+            state_fpath_n,
+            v_0,
+            voice_target,
+            const_ini_state,
+            const_control,
+            const_prop,
+            voicing_time,
             v_step=v_step,
-            comp_input_n=comp_input_0
+            comp_input_n=comp_input_0,
         )
         v_0 = v_1
 
+
 def solve_swelling_rate(
-        model: Model,
-        fpath: str,
-        v: NDArray, comp_input: NDArray,
-        const_ini_state: bv.BlockVector,
-        const_control: bv.BlockVector,
-        const_prop: bv.BlockVector,
-        voicing_time: NDArray
-    ):
+    model: Model,
+    fpath: str,
+    v: NDArray,
+    comp_input: NDArray,
+    const_ini_state: bv.BlockVector,
+    const_control: bv.BlockVector,
+    const_prop: bv.BlockVector,
+    voicing_time: NDArray,
+):
     """
     Return the swelling rate for the given conditions
 
@@ -621,9 +678,14 @@ def solve_swelling_rate(
     if not path.isfile(fpath):
         with sf.StateFile(model, fpath, mode='w') as f:
             _, solve_info = integrate(
-                model, f,
-                v, comp_input,
-                const_ini_state, const_control, const_prop, voicing_time
+                model,
+                f,
+                v,
+                comp_input,
+                const_ini_state,
+                const_control,
+                const_prop,
+                voicing_time,
             )
             voice_target = proc_voice_output(f, len(voice_target))
 
@@ -633,17 +695,19 @@ def solve_swelling_rate(
 
     return swelling_rate
 
+
 def integrate_vc_step(
-        model: Model,
-        state_fpath_n: str,
-        v_n: NDArray, voice_target: NDArray,
-        const_ini_state: bv.BlockVector,
-        const_control: bv.BlockVector,
-        const_prop: bv.BlockVector,
-        voicing_time: NDArray,
-        comp_input_n: Optional[NDArray]=None,
-        v_step: float=0.05
-    ):
+    model: Model,
+    state_fpath_n: str,
+    v_n: NDArray,
+    voice_target: NDArray,
+    const_ini_state: bv.BlockVector,
+    const_control: bv.BlockVector,
+    const_prop: bv.BlockVector,
+    voicing_time: NDArray,
+    comp_input_n: Optional[NDArray] = None,
+    v_step: float = 0.05,
+):
     """
     Integrate the vicious cycle over a single step
 
@@ -674,22 +738,30 @@ def integrate_vc_step(
 
     # input `v_n` `comp_input_n` `voice_target` `state_fpath`
     const_ini_state, *_, solve_info = map_vc_input_to_model_input(
-        model,
-        v_n, comp_input_n,
-        const_ini_state, const_control, const_prop
+        model, v_n, comp_input_n, const_ini_state, const_control, const_prop
     )
 
     comp_input_n, compensation_solver_info = solve_comp_input(
-        model, state_fpath_n,
-        v_n, voice_target,
-        const_ini_state, const_control, const_prop, voicing_time,
-        comp_input_0=comp_input_n
+        model,
+        state_fpath_n,
+        v_n,
+        voice_target,
+        const_ini_state,
+        const_control,
+        const_prop,
+        voicing_time,
+        comp_input_0=comp_input_n,
     )
 
     vd_n = solve_swelling_rate(
-        model, state_fpath_n,
-        v_n, comp_input_n,
-        const_ini_state, const_control, const_prop, voicing_time
+        model,
+        state_fpath_n,
+        v_n,
+        comp_input_n,
+        const_ini_state,
+        const_control,
+        const_prop,
+        voicing_time,
     )
 
     with sf.StateFile(model, state_fpath_n, mode='r') as f:
@@ -701,17 +773,19 @@ def integrate_vc_step(
     print(f"Post compensation voice output: {voice_output}")
     print(f"Compensation solver stats: {compensation_solver_info}")
 
-    dv = v_step*vd_n/vd_n.max()
+    dv = v_step * vd_n / vd_n.max()
     v_1 = v_n + dv
     return v_1, comp_input_n
 
+
 def resume_integrate_vc(
-        model: Model,
-        n_start: int, n_stop: int,
-        v_step: float=0.05,
-        output_dir: str='out',
-        base_fname: str='SwellingStep'
-    ):
+    model: Model,
+    n_start: int,
+    n_stop: int,
+    v_step: float = 0.05,
+    output_dir: str = 'out',
+    base_fname: str = 'SwellingStep',
+):
     """
     Integrate the vicious cycle starting from a previous voicing simulation
 
@@ -742,20 +816,49 @@ def resume_integrate_vc(
     # NOTE: Ideally you should be able to figure out what the compensatory input
     # was from the initial state file
     comp_input_0 = np.array([0])
-    for n in tqdm(
-            range(n_start, n_stop+1),
-            desc='Vicious cycle integration'
-        ):
+    for n in tqdm(range(n_start, n_stop), desc='Vicious cycle integration'):
 
         state_fpath_n = f'{output_dir}/{base_fname}{n}.h5'
         v_1, comp_input_0 = integrate_vc_step(
-            model, state_fpath_n,
-            v_0, voice_target,
-            const_ini_state, const_control, const_prop, voicing_time,
+            model,
+            state_fpath_n,
+            v_0,
+            voice_target,
+            const_ini_state,
+            const_control,
+            const_prop,
+            voicing_time,
             v_step=v_step,
-            comp_input_n=comp_input_0
+            comp_input_n=comp_input_0,
         )
         v_0 = v_1
+
+
+def postprocess(
+    out_fpath: str,
+    in_fpaths: List[str],
+    overwrite_results: Optional[List[str]] = None,
+    num_proc: int = 1,
+):
+    """
+    Postprocess key signals from the simulations
+    """
+    # signal_to_proc = get_result_to_proc(model)
+    # result_names = list(signal_to_proc.keys())
+
+    with h5py.File(out_fpath, mode='a') as f:
+        for in_fpath in in_fpaths:
+            case_name = path.splitext(in_fpath.split('/')[-1])[0]
+            print(case_name)
+            postprocutils.postprocess_parallel(
+                f.require_group(case_name),
+                in_fpath,
+                lambda name: model,
+                main.get_result_name_to_postprocess,
+                num_proc=num_proc,
+                overwrite_results=overwrite_results,
+            )
+
 
 if __name__ == '__main__':
     from os import path
@@ -764,41 +867,49 @@ if __name__ == '__main__':
 
     parser = ArgumentParser()
     parser.add_argument('--export-xdmf', type=bool, default=False)
+    parser.add_argument('--postprocess', type=bool, default=False)
     parser.add_argument('--run-vc-sim', type=bool, default=False)
     parser.add_argument('--output-dir', type=str, default='out')
+    parser.add_argument("--overwrite-results", type=str, action='extend', nargs='+')
     cmd_args = parser.parse_args()
 
-    param = main.ExpParam({
-        'MeshName': cases.MESH_BASE_NAME, 'clscale': 0.75,
-        'GA': 3,
-        'DZ': 1.5, 'NZ': 15,
-        'Ecov': cases.ECOV, 'Ebod': cases.EBOD,
-        'vcov': 1, 'mcov': 0.0,
-        'psub': 200*10,
-        'dt': 5e-5, 'tf': 0.50,
-        'ModifyEffect': '',
-        'SwellingDistribution': 'uniform',
-        'SwellingModel': 'power'
-    })
-    param = main.ExpParam({
-        'MeshName': cases.MESH_BASE_NAME, 'clscale': 0.94,
-        'GA': 3,
-        'DZ': 1.5, 'NZ': 12,
-        'Ecov': cases.ECOV, 'Ebod': cases.EBOD,
-        'vcov': 1, 'mcov': 0.0,
-        'psub': 400*10,
-        'dt': 5e-5, 'tf': 0.50,
-        'ModifyEffect': '',
-        'SwellingDistribution': 'uniform',
-        'SwellingModel': 'power'
-    })
+    param = main.ExpParam(
+        {
+            'MeshName': cases.MESH_BASE_NAME,
+            'clscale': 0.75,
+            'GA': 3,
+            'DZ': 1.5,
+            'NZ': 15,
+            'Ecov': cases.ECOV,
+            'Ebod': cases.EBOD,
+            'vcov': 1,
+            'mcov': 0.0,
+            'psub': 400 * 10,
+            'dt': 5e-5,
+            'tf': 0.50,
+            'ModifyEffect': '',
+            'SwellingDistribution': 'uniform',
+            'SwellingModel': 'power',
+        }
+    )
+    # param = main.ExpParam({
+    #     'MeshName': cases.MESH_BASE_NAME, 'clscale': 0.94,
+    #     'GA': 3,
+    #     'DZ': 1.5, 'NZ': 12,
+    #     'Ecov': cases.ECOV, 'Ebod': cases.EBOD,
+    #     'vcov': 1, 'mcov': 0.0,
+    #     'psub': 400*10,
+    #     'dt': 5e-5, 'tf': 0.50,
+    #     'ModifyEffect': '',
+    #     'SwellingDistribution': 'uniform',
+    #     'SwellingModel': 'power'
+    # })
     model = main.setup_model(param)
 
     N_START = 0
-    N_STOP = 15
+    N_STOP = 1
     fpaths = [
-        f'{cmd_args.output_dir}/SwellingStep{n}.h5'
-        for n in range(N_START, N_STOP+1)
+        f'{cmd_args.output_dir}/SwellingStep{n}.h5' for n in range(N_START, N_STOP)
     ]
 
     if cmd_args.run_vc_sim:
@@ -809,14 +920,16 @@ if __name__ == '__main__':
                 f"Some existing files, {fpaths[1:]}, would be overwritten."
             )
         else:
-            const_ini_state, const_controls, const_prop = main.setup_state_control_prop(param, model)
+            const_ini_state, const_controls, const_prop = main.setup_state_control_prop(
+                param, model
+            )
 
             # This is how long to integrate the 'voicing' simulations for, which
             # are used to determine damage rates, swelling fields, etc.
-            voicing_time = 5e-5*np.arange(2**3)
+            voicing_time = 5e-5 * np.arange(2**3)
             # voicing_time = 5e-5*np.arange(2**8)
             # voicing_time = 5e-5*np.arange(2**10)
-            voicing_time = 5e-5*np.arange(2**12)
+            voicing_time = 5e-5 * np.arange(2**12)
             # voicing_time = 5e-5*np.arange(2**13)
 
             # `v0` and `x0` are the initial swelling field and compensatory inputs
@@ -827,24 +940,41 @@ if __name__ == '__main__':
             if N_START == 0:
                 integrate_vc(
                     model,
-                    v_0, None,
-                    const_ini_state, const_controls[0], const_prop, voicing_time,
-                    n_start=N_START, n_stop=N_STOP,
-                    v_step=0.05, output_dir=cmd_args.output_dir,
+                    v_0,
+                    None,
+                    const_ini_state,
+                    const_controls[0],
+                    const_prop,
+                    voicing_time,
+                    n_start=N_START,
+                    n_stop=N_STOP,
+                    v_step=0.05,
+                    output_dir=cmd_args.output_dir,
                     base_fname='SwellingStep',
-                    comp_input_0=x_0
+                    comp_input_0=x_0,
                 )
             else:
                 resume_integrate_vc(
-                    N_START, N_STOP, v_step=0.05, output_dir=cmd_args.output_dir,
-                    base_fname='SwellingStep'
+                    N_START,
+                    N_STOP,
+                    v_step=0.05,
+                    output_dir=cmd_args.output_dir,
+                    base_fname='SwellingStep',
                 )
 
+    if cmd_args.postprocess:
+        _postprocess = functools.partial(
+            postprocess, overwrite_results=cmd_args.overwrite_results
+        )
+
+        out_fpath = f'{cmd_args.output_dir}/postprocess.h5'
+        _postprocess(out_fpath, fpaths, num_proc=1)
+
     if cmd_args.export_xdmf:
-        for fpath in fpaths:
-            with h5py.File(fpath, mode='r') as fstate:
-                h5_head, h5_suffix = path.splitext(fpath)
-                xdmf_path = f'{h5_head}--export.xdmf'
-                postprocess_xdmf(
-                    model, fstate, xdmf_path
-                )
+        with h5py.File(f'{cmd_args.output_dir}/postprocess.h5', mode='r') as fpost:
+            for fpath in fpaths:
+                with h5py.File(fpath, mode='r') as fstate:
+                    fdir, fname = path.split(fpath)
+                    fname_head, fname_suffix = path.splitext(fname)
+                    xdmf_path = f'{fdir}/{fname_head}--export.xdmf'
+                    postprocess_xdmf(model, fstate, fpost[fname_head], xdmf_path)
