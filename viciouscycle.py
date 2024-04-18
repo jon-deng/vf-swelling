@@ -336,8 +336,8 @@ def solve_comp_input(
     const_control: bv.BlockVector,
     const_prop: bv.BlockVector,
     voicing_time: NDArray,
-    comp_input_0: Optional[NDArray] = None,
-) -> Tuple[bv.BlockVector, SolverInfo]:
+    comp_input_0: Optional[NDArray] = None
+) -> Tuple[str, bv.BlockVector, SolverInfo]:
     """
     Return compensatory adjustments needed to achieve target voice outputs
 
@@ -363,35 +363,54 @@ def solve_comp_input(
 
         This is assumed to be in the order:
         (subglottal pressure, modulus increase).
+    use_existing_fpath_on_first: bool
+        Whether to use an existing voicing simulation as the first iterative guess
     """
     # Compute the swollen initial state once so you can reuse it for each
     # simulation
     # ; you only have to compute it once because the swelling magnitude remains
     # constant
-    ini_state, *_ = map_vc_input_to_model_input(
+    const_ini_state, *_ = map_vc_input_to_model_input(
         model, v, comp_input_0, const_ini_state, const_control, const_prop
     )
 
     # Use an iterative Newton method to find the appropriate compensatory
     # adjustments
     def lin_subproblem(x):
+        # Get model parameters for current guess `x`
+        ini_state, control, prop, _ = map_vc_input_to_model_input(
+            model, v, x, const_ini_state, const_control, const_prop
+        )
+
+        # Check whether an existing voicing simulation exists for the current guess
+        existing_voicing_sim = False
+        if path.isfile(fpath):
+            with sf.StateFile(model, fpath, mode='r') as f:
+
+                ext_ini_state = f.get_state(0)
+                ext_control = f.get_control(0)
+                ext_prop = f.get_prop()
+
+                ini_state_err = (ini_state-ext_ini_state).norm()
+                control_err = (control-ext_control).norm()
+                prop_err = (prop-ext_prop).norm()
+
+                if np.isclose([ini_state_err, control_err, prop_err], 0):
+                    existing_voicing_sim = True
+
         # Calculate voice output sensitivity to phonation parameters
         # with a FD approximation
-        with sf.StateFile(model, fpath, mode='w') as f:
-            integrate(
-                model, f, v, x, ini_state, const_control, const_prop, voicing_time
-            )
+        if not existing_voicing_sim:
+            with sf.StateFile(model, fpath, mode='w') as f:
+                forward.integrate(model, f, ini_state, [control], prop, voicing_time)
+
+        with sf.StateFile(model, fpath, mode='r') as f:
             y = proc_voice_output(f, len(comp_input_0))
             path_head, path_tail = path.splitext(fpath)
             jac = make_voice_output_jac(
                 model,
-                y,
-                v,
-                x,
-                ini_state,
-                const_control,
-                const_prop,
-                voicing_time,
+                y, v, x,
+                ini_state, const_control, const_prop, voicing_time,
                 fpath=f'{path_head}--tmp{path_tail}',
             )
         y1 = voice_target
@@ -420,7 +439,7 @@ def solve_comp_input(
             "Couldn't find compensatory input!" "Solver failed with info: " f"{info}"
         )
 
-    return comp_input, info
+    return fpath, comp_input, info
 
 
 def integrate(
@@ -608,16 +627,13 @@ def integrate_vc(
     # Establish the voice target if none is provided
     if voice_target is None:
         state_fpath_0 = f'{output_dir}/{base_fname}{n_start}.h5'
+
+        ini_state, control, prop, _ = map_vc_input_to_model_input(
+            model, v_0, comp_input_0, const_ini_state, const_control, const_prop
+        )
         with sf.StateFile(model, state_fpath_0, mode='w') as f:
-            _, solve_info = integrate(
-                model,
-                f,
-                v_0,
-                comp_input_0,
-                const_ini_state,
-                const_control,
-                const_prop,
-                voicing_time,
+            _, solve_info = forward.integrate(
+                model, f, ini_state, [control], prop, voicing_time, use_tqdm=True
             )
             voice_target = proc_voice_output(f, len(comp_input_0))
 
@@ -627,29 +643,17 @@ def integrate_vc(
 
         state_fpath_n = f'{output_dir}/{base_fname}{n}.h5'
         v_1, comp_input_0 = integrate_vc_step(
-            model,
-            state_fpath_n,
-            v_0,
-            voice_target,
-            const_ini_state,
-            const_control,
-            const_prop,
-            voicing_time,
-            v_step=v_step,
-            comp_input_n=comp_input_0,
+            model, state_fpath_n,
+            v_0, voice_target,
+            const_ini_state, const_control, const_prop, voicing_time,
+            v_step=v_step, comp_input_n=comp_input_0,
         )
         v_0 = v_1
 
 
-def solve_swelling_rate(
+def proc_swelling_rate(
     model: Model,
-    fpath: str,
-    v: NDArray,
-    comp_input: NDArray,
-    const_ini_state: bv.BlockVector,
-    const_control: bv.BlockVector,
-    const_prop: bv.BlockVector,
-    voicing_time: NDArray,
+    fpath: str
 ):
     """
     Return the swelling rate for the given conditions
@@ -675,20 +679,6 @@ def solve_swelling_rate(
     voicing_time: NDArray
         A voicing time vector
     """
-    if not path.isfile(fpath):
-        with sf.StateFile(model, fpath, mode='w') as f:
-            _, solve_info = integrate(
-                model,
-                f,
-                v,
-                comp_input,
-                const_ini_state,
-                const_control,
-                const_prop,
-                voicing_time,
-            )
-            voice_target = proc_voice_output(f, len(voice_target))
-
     with sf.StateFile(model, fpath, mode='r') as f:
         dmg_rate = proc_damage_rate(model, f)
         swelling_rate = calc_swelling_rate(dmg_rate)
@@ -736,33 +726,14 @@ def integrate_vc_step(
     if comp_input_n is None:
         comp_input_n = np.zeros(voice_target.shape)
 
-    # input `v_n` `comp_input_n` `voice_target` `state_fpath`
-    const_ini_state, *_, solve_info = map_vc_input_to_model_input(
-        model, v_n, comp_input_n, const_ini_state, const_control, const_prop
-    )
-
-    comp_input_n, compensation_solver_info = solve_comp_input(
-        model,
-        state_fpath_n,
-        v_n,
-        voice_target,
-        const_ini_state,
-        const_control,
-        const_prop,
-        voicing_time,
+    state_fpath_n, comp_input_n, compensation_solver_info = solve_comp_input(
+        model, state_fpath_n,
+        v_n, voice_target,
+        const_ini_state, const_control, const_prop, voicing_time,
         comp_input_0=comp_input_n,
     )
 
-    vd_n = solve_swelling_rate(
-        model,
-        state_fpath_n,
-        v_n,
-        comp_input_n,
-        const_ini_state,
-        const_control,
-        const_prop,
-        voicing_time,
-    )
+    vd_n = proc_swelling_rate(model, state_fpath_n)
 
     with sf.StateFile(model, state_fpath_n, mode='r') as f:
         voice_output = proc_voice_output(f, len(voice_target))
@@ -907,7 +878,7 @@ if __name__ == '__main__':
     model = main.setup_model(param)
 
     N_START = 0
-    N_STOP = 1
+    N_STOP = 2
     fpaths = [
         f'{cmd_args.output_dir}/SwellingStep{n}.h5' for n in range(N_START, N_STOP)
     ]
