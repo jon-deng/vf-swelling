@@ -931,25 +931,25 @@ if __name__ == '__main__':
             'SwellingModel': 'power',
         }
     )
-    param = main.ExpParam(
-        {
-            'MeshName': cases.MESH_BASE_NAME,
-            'clscale': 0.94,
-            'GA': 3,
-            'DZ': 1.5,
-            'NZ': 12,
-            'Ecov': cases.ECOV,
-            'Ebod': cases.EBOD,
-            'vcov': 1,
-            'mcov': 0.0,
-            'psub': 400 * 10,
-            'dt': 5e-5,
-            'tf': 0.50,
-            'ModifyEffect': '',
-            'SwellingDistribution': 'uniform',
-            'SwellingModel': 'power',
-        }
-    )
+    # param = main.ExpParam(
+    #     {
+    #         'MeshName': cases.MESH_BASE_NAME,
+    #         'clscale': 0.94,
+    #         'GA': 3,
+    #         'DZ': 1.5,
+    #         'NZ': 12,
+    #         'Ecov': cases.ECOV,
+    #         'Ebod': cases.EBOD,
+    #         'vcov': 1,
+    #         'mcov': 0.0,
+    #         'psub': 400 * 10,
+    #         'dt': 5e-5,
+    #         'tf': 0.50,
+    #         'ModifyEffect': '',
+    #         'SwellingDistribution': 'uniform',
+    #         'SwellingModel': 'power',
+    #     }
+    # )
     model = main.setup_model(param)
 
     N_START = 0
