@@ -124,7 +124,9 @@ def calc_prms(t: NDArray, q: NDArray) -> float:
     return prms
 
 
-def proc_damage_rate(model: Model, f: sf.StateFile) -> NDArray:
+def proc_damage_rate(
+    model: Model, f: sf.StateFile, damage_measure: str = 'viscous_dissipation'
+) -> NDArray:
     """
     Return the damage rate
 
@@ -139,11 +141,22 @@ def proc_damage_rate(model: Model, f: sf.StateFile) -> NDArray:
     dx = model.solid.residual.measure('dx')
     mesh = model.solid.residual.mesh()
     fspace = dfn.FunctionSpace(mesh, 'DG', 0)
-    state_measure = slsig.ViscousDissipationField(model, dx=dx, fspace=fspace)
+    if damage_measure == 'viscous_dissipation':
+        state_measure = slsig.ViscousDissipationField(model, dx=dx, fspace=fspace)
 
-    def measure(f):
-        mean = TimeSeriesStats(state_measure).mean(f, range(f.size // 2, f.size))
-        return mean
+        def measure(f):
+            mean = TimeSeriesStats(state_measure).mean(f, range(f.size // 2, f.size))
+            return mean
+
+    elif damage_measure == 'strain_energy':
+        state_measure = slsig.StrainEnergy(model, dx=dx, fspace=fspace)
+
+        def measure(f):
+            mean = TimeSeriesStats(state_measure).max(f, range(f.size // 2, f.size))
+            return mean
+
+    else:
+        raise ValueError(f"Unknown damage measure '{damage_measure}'")
 
     damage = measure(f)
     return damage
@@ -162,7 +175,9 @@ def calc_swelling_rate(damage_rate: NDArray) -> NDArray:
     return K * damage_rate
 
 
-def proc_swelling_rate(model: Model, fpath: str) -> NDArray:
+def proc_swelling_rate(
+    model: Model, fpath: str, damage_measure: str = 'viscous_dissipation'
+) -> NDArray:
     """
     Return the swelling rate for the given conditions
 
@@ -188,7 +203,7 @@ def proc_swelling_rate(model: Model, fpath: str) -> NDArray:
         A voicing time vector
     """
     with sf.StateFile(model, fpath, mode='r') as f:
-        dmg_rate = proc_damage_rate(model, f)
+        dmg_rate = proc_damage_rate(model, f, damage_measure=damage_measure)
         swelling_rate = calc_swelling_rate(dmg_rate)
 
     return swelling_rate
@@ -620,6 +635,7 @@ def integrate_vc(
     n_stop: int = 1,
     v_step: float = 0.05,
     comp_input_0: Optional[NDArray] = None,
+    damage_measure: str = 'viscous_dissipation',
     output_dir: str = 'out',
     base_fname: str = 'SwellingStep',
 ):
@@ -686,6 +702,7 @@ def integrate_vc(
         n_start=n_start,
         n_stop=n_stop,
         v_step=v_step,
+        damage_measure=damage_measure,
         comp_input_0=comp_input_0,
         output_dir=output_dir,
         base_fname=base_fname,
@@ -697,6 +714,7 @@ def resume_integrate_vc(
     n_start: int,
     n_stop: int,
     v_step: float = 0.05,
+    damage_measure: str = 'viscous_dissipation',
     output_dir: str = 'out',
     base_fname: str = 'SwellingStep',
 ):
@@ -743,6 +761,7 @@ def resume_integrate_vc(
         n_start=n_start,
         n_stop=n_stop,
         v_step=v_step,
+        damage_measure=damage_measure,
         comp_input_0=comp_input_0,
         output_dir=output_dir,
         base_fname=base_fname,
@@ -760,6 +779,7 @@ def integrate_vc_steps(
     n_start: int = 0,
     n_stop: int = 1,
     v_step: float = 0.05,
+    damage_measure: str = 'viscous_dissipation',
     comp_input_0: Optional[NDArray] = None,
     output_dir: str = 'out',
     base_fname: str = 'SwellingStep',
@@ -777,6 +797,7 @@ def integrate_vc_steps(
             const_prop,
             voicing_time,
             v_step=v_step,
+            damage_measure=damage_measure,
             comp_input_n=comp_input_0,
         )
         v_0 = v_1
@@ -793,6 +814,7 @@ def integrate_vc_step(
     voicing_time: NDArray,
     comp_input_n: Optional[NDArray] = None,
     v_step: float = 0.05,
+    damage_measure: str = 'viscous_dissipation',
 ):
     """
     Integrate the vicious cycle over a single step
@@ -834,7 +856,7 @@ def integrate_vc_step(
         comp_input_0=comp_input_n,
     )
 
-    vd_n = proc_swelling_rate(model, state_fpath_n)
+    vd_n = proc_swelling_rate(model, state_fpath_n, damage_measure=damage_measure)
 
     with sf.StateFile(model, state_fpath_n, mode='r') as f:
         voice_output = proc_voice_output(f, len(voice_target))
@@ -882,11 +904,12 @@ if __name__ == '__main__':
     import cases
 
     parser = ArgumentParser()
-    parser.add_argument('--export-xdmf', type=bool, default=False)
-    parser.add_argument('--postprocess', type=bool, default=False)
-    parser.add_argument('--run-vc-sim', type=bool, default=False)
-    parser.add_argument('--output-dir', type=str, default='out')
+    parser.add_argument("--export-xdmf", type=bool, default=False)
+    parser.add_argument("--postprocess", type=bool, default=False)
+    parser.add_argument("--run-vc-sim", type=bool, default=False)
+    parser.add_argument("--output-dir", type=str, default='out')
     parser.add_argument("--overwrite-results", type=str, action='extend', nargs='+')
+    parser.add_argument("--damage-measure", type=str, default='viscous_dissipation')
     cmd_args = parser.parse_args()
 
     param = main.ExpParam(
@@ -908,22 +931,29 @@ if __name__ == '__main__':
             'SwellingModel': 'power',
         }
     )
-    # param = main.ExpParam({
-    #     'MeshName': cases.MESH_BASE_NAME, 'clscale': 0.94,
-    #     'GA': 3,
-    #     'DZ': 1.5, 'NZ': 12,
-    #     'Ecov': cases.ECOV, 'Ebod': cases.EBOD,
-    #     'vcov': 1, 'mcov': 0.0,
-    #     'psub': 400*10,
-    #     'dt': 5e-5, 'tf': 0.50,
-    #     'ModifyEffect': '',
-    #     'SwellingDistribution': 'uniform',
-    #     'SwellingModel': 'power'
-    # })
+    param = main.ExpParam(
+        {
+            'MeshName': cases.MESH_BASE_NAME,
+            'clscale': 0.94,
+            'GA': 3,
+            'DZ': 1.5,
+            'NZ': 12,
+            'Ecov': cases.ECOV,
+            'Ebod': cases.EBOD,
+            'vcov': 1,
+            'mcov': 0.0,
+            'psub': 400 * 10,
+            'dt': 5e-5,
+            'tf': 0.50,
+            'ModifyEffect': '',
+            'SwellingDistribution': 'uniform',
+            'SwellingModel': 'power',
+        }
+    )
     model = main.setup_model(param)
 
-    N_START = 1
-    N_STOP = 3
+    N_START = 0
+    N_STOP = 10
     fpaths = [
         f'{cmd_args.output_dir}/SwellingStep{n}.h5' for n in range(N_START, N_STOP)
     ]
@@ -947,7 +977,7 @@ if __name__ == '__main__':
         # voicing_time = 5e-5*np.arange(2**8)
         # voicing_time = 5e-5*np.arange(2**10)
         # voicing_time = 5e-5 * np.arange(2**12)
-        # voicing_time = 5e-5*np.arange(2**13)
+        voicing_time = 5e-5 * np.arange(2**13)
 
         # `v0` and `x0` are the initial swelling field and compensatory inputs
         v_0 = np.ones(const_prop['v_swelling'].shape)

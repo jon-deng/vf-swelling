@@ -292,10 +292,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         vcovs = np.array([1.0])
         mcovs = np.array([0.0, -0.8])
         psubs = np.array([400 * 10, 410 * 10])
-        damage_measures = [
-            'field.tavg_viscous_rate',
-            'field.tmax_strain_energy'
-        ]
+        damage_measures = ['field.tavg_viscous_rate', 'field.tmax_strain_energy']
 
         params = [
             make_param(*args)
@@ -317,10 +314,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
 
         vcovs = np.array([1.01, 1.02, 1.03, 1.04, 1.05, 1.06, 1.07])
         mcovs = np.array([0.0, -0.8])
-        damage_measures = [
-            'field.tavg_viscous_rate',
-            'field.tmax_strain_energy'
-        ]
+        damage_measures = ['field.tavg_viscous_rate', 'field.tmax_strain_energy']
 
         params = [
             make_param(*args)
