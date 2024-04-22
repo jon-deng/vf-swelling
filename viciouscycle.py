@@ -904,12 +904,21 @@ if __name__ == '__main__':
     import cases
 
     parser = ArgumentParser()
-    parser.add_argument("--export-xdmf", type=bool, default=False)
-    parser.add_argument("--postprocess", type=bool, default=False)
-    parser.add_argument("--run-vc-sim", type=bool, default=False)
+    # Whether to run different parts of processing
+    parser.add_argument("--run-vc-sim", action='store_const', default=False)
+    parser.add_argument("--export-xdmf", action='store_const', default=False)
+    parser.add_argument("--postprocess", action='store_const', default=False)
+
+    # Where/how to write results
     parser.add_argument("--output-dir", type=str, default='out')
     parser.add_argument("--overwrite-results", type=str, action='extend', nargs='+')
+
+    # Control which damage measure is used for swelling
     parser.add_argument("--damage-measure", type=str, default='viscous_dissipation')
+
+    # Voicing time parameters
+    parser.add_argument("--dt", type=float, default=5e-5)
+    parser.add_argument("--nt", type=int, default=2**13)
     cmd_args = parser.parse_args()
 
     param = main.ExpParam(
@@ -972,12 +981,7 @@ if __name__ == '__main__':
 
         # This is how long to integrate the 'voicing' simulations for, which
         # are used to determine damage rates, swelling fields, etc.
-        # voicing_time = 5e-5 * np.arange(2**2)
-        voicing_time = 5e-5 * np.arange(2**4)
-        # voicing_time = 5e-5*np.arange(2**8)
-        # voicing_time = 5e-5*np.arange(2**10)
-        # voicing_time = 5e-5 * np.arange(2**12)
-        voicing_time = 5e-5 * np.arange(2**13)
+        voicing_time = cmd_args.dt * np.arange(cmd_args.nt)
 
         # `v0` and `x0` are the initial swelling field and compensatory inputs
         v_0 = np.ones(const_prop['v_swelling'].shape)
