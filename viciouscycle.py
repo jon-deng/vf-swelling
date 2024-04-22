@@ -145,15 +145,14 @@ def proc_damage_rate(
         state_measure = slsig.ViscousDissipationField(model, dx=dx, fspace=fspace)
 
         def measure(f):
-            mean = TimeSeriesStats(state_measure).mean(f, range(f.size // 2, f.size))
-            return mean
-
+            time_mean = TimeSeriesStats(state_measure).mean(f, range(f.size // 2, f.size))
+            return time_mean
     elif damage_measure == 'strain_energy':
         state_measure = slsig.StrainEnergy(model, dx=dx, fspace=fspace)
 
         def measure(f):
-            mean = TimeSeriesStats(state_measure).max(f, range(f.size // 2, f.size))
-            return mean
+            time_max = TimeSeriesStats(state_measure).max(f, range(f.size // 2, f.size))
+            return time_max
 
     else:
         raise ValueError(f"Unknown damage measure '{damage_measure}'")
@@ -856,6 +855,7 @@ def integrate_vc_step(
         comp_input_0=comp_input_n,
     )
 
+    breakpoint()
     vd_n = proc_swelling_rate(model, state_fpath_n, damage_measure=damage_measure)
 
     with sf.StateFile(model, state_fpath_n, mode='r') as f:
@@ -1000,6 +1000,7 @@ if __name__ == '__main__':
                 output_dir=cmd_args.output_dir,
                 base_fname='SwellingStep',
                 comp_input_0=x_0,
+                damage_measure=cmd_args.damage_measure
             )
         else:
             resume_integrate_vc(
@@ -1009,6 +1010,7 @@ if __name__ == '__main__':
                 v_step=0.05,
                 output_dir=cmd_args.output_dir,
                 base_fname='SwellingStep',
+                damage_measure=cmd_args.damage_measure
             )
 
     if cmd_args.postprocess:
