@@ -855,7 +855,6 @@ def integrate_vc_step(
         comp_input_0=comp_input_n,
     )
 
-    breakpoint()
     vd_n = proc_swelling_rate(model, state_fpath_n, damage_measure=damage_measure)
 
     with sf.StateFile(model, state_fpath_n, mode='r') as f:
@@ -905,9 +904,9 @@ if __name__ == '__main__':
 
     parser = ArgumentParser()
     # Whether to run different parts of processing
-    parser.add_argument("--run-vc-sim", action='store_const', default=False)
-    parser.add_argument("--export-xdmf", action='store_const', default=False)
-    parser.add_argument("--postprocess", action='store_const', default=False)
+    parser.add_argument("--run-vc-sim", action='store_true')
+    parser.add_argument("--export-xdmf", action='store_true')
+    parser.add_argument("--postprocess", action='store_true')
 
     # Where/how to write results
     parser.add_argument("--output-dir", type=str, default='out')
