@@ -153,7 +153,6 @@ def proc_damage_rate(
         def measure(f):
             time_max = TimeSeriesStats(state_measure).max(f, range(f.size // 2, f.size))
             return time_max
-
     else:
         raise ValueError(f"Unknown damage measure '{damage_measure}'")
 
@@ -918,6 +917,11 @@ if __name__ == '__main__':
     # Voicing time parameters
     parser.add_argument("--dt", type=float, default=5e-5)
     parser.add_argument("--nt", type=int, default=2**13)
+
+    # Vicious cycle integration parameters
+    parser.add_argument("--dv", type=float, default=0.05)
+    parser.add_argument("--nstart", type=int, default=0)
+    parser.add_argument("--nstop", type=int, default=0)
     cmd_args = parser.parse_args()
 
     param = main.ExpParam(
@@ -960,10 +964,11 @@ if __name__ == '__main__':
     # )
     model = main.setup_model(param)
 
-    N_START = 0
-    N_STOP = 10
+    dv = cmd_args.dv
+    n_start = cmd_args.nstart
+    n_stop = cmd_args.nstop
     fpaths = [
-        f'{cmd_args.output_dir}/SwellingStep{n}.h5' for n in range(N_START, N_STOP)
+        f'{cmd_args.output_dir}/SwellingStep{n}.h5' for n in range(n_start, n_stop)
     ]
 
     if cmd_args.run_vc_sim:
@@ -997,9 +1002,9 @@ if __name__ == '__main__':
                 const_controls[0],
                 const_prop,
                 voicing_time,
-                n_start=N_START,
-                n_stop=N_STOP,
-                v_step=0.05,
+                n_start=n_start,
+                n_stop=n_stop,
+                v_step=dv,
                 output_dir=cmd_args.output_dir,
                 base_fname='SwellingStep',
                 comp_input_0=x_0,
@@ -1008,9 +1013,9 @@ if __name__ == '__main__':
         else:
             resume_integrate_vc(
                 model,
-                N_START,
-                N_STOP,
-                v_step=0.05,
+                n_start,
+                n_stop,
+                v_step=dv,
                 output_dir=cmd_args.output_dir,
                 base_fname='SwellingStep',
                 damage_measure=cmd_args.damage_measure
