@@ -491,38 +491,46 @@ def postprocess_xdmf(model, param: ExpParam, xdmf_path: str, overwrite: bool = F
     ):
         # breakpoint()
         # Export mesh values
-        _labels = ['mesh/solid', 'time']
-        labels = _labels
-        datasets = [fstate[label] for label in _labels]
+        export_labels = ['mesh/solid', 'time']
+        labels = export_labels
+        datasets = [fstate[label] for label in export_labels]
         formats = [None, None]
 
         mesh = model.solid.residual.mesh()
         function_space = dfn.VectorFunctionSpace(mesh, 'CG', 1)
-        _labels = ['state/u', 'state/v', 'state/a']
-        labels += _labels
-        datasets += [fstate[label] for label in _labels]
-        formats += len(_labels) * [function_space]
+        export_labels = ['state/u', 'state/v', 'state/a']
+        labels += export_labels
+        datasets += [fstate[label] for label in export_labels]
+        formats += len(export_labels) * [function_space]
 
         function_space = dfn.FunctionSpace(mesh, 'CG', 1)
-        _labels = ['time.field.p']
-        labels += _labels
-        datasets += [fpost[f'{param.to_str()}/{label}'] for label in _labels]
-        formats += len(_labels) * [function_space]
+        export_labels = ['time.field.p']
+        labels += export_labels
+        datasets += [fpost[f'{param.to_str()}/{label}'] for label in export_labels]
+        formats += len(export_labels) * [function_space]
 
         function_space = dfn.FunctionSpace(mesh, 'DG', 0)
-        _labels = ['field.tavg_viscous_rate', 'field.tavg_strain_energy']
-        labels += _labels
-        datasets += [fpost[f'{param.to_str()}/{label}'] for label in _labels]
-        formats += len(_labels) * [function_space]
+        export_labels = ['field.tavg_viscous_rate', 'field.tavg_strain_energy', 'field.growth_rate']
+        # Account for the missing 'field.growth_rate' key for some measures
+        export_labels = [label for label in export_labels if f'{param.to_str()}/{label}' in fpost]
+        labels += export_labels
+        datasets += [fpost[f'{param.to_str()}/{label}'] for label in export_labels]
+        formats += len(export_labels) * [function_space]
+
         xdmfutils.export_mesh_values(datasets, formats, fxdmf, output_names=labels)
 
         # Annotate the mesh values with an XDMF file
+        xdmf_DG0_labels = ['field.tavg_viscous_rate', 'field.tavg_strain_energy', 'field.growth_rate']
+        xdmf_DG0_labels = [label for label in export_labels if label in fxdmf]
+        xdmf_DG0_descrs = [(fxdmf[label], 'scalar', 'Cell') for label in xdmf_DG0_labels]
+
+        # print(f"Exporting case: {param.to_str()}")
+        # print(f"Exporting post-processed labels: {xdmf_DG0_labels}")
+
         static_dataset_descrs = [
             (fxdmf['state/u'], 'vector', 'node'),
-            (fxdmf['field.tavg_viscous_rate'], 'scalar', 'Cell'),
-            (fxdmf['field.tavg_strain_energy'], 'scalar', 'Cell'),
-        ]
-        static_idxs = [(0, ...), (slice(None),), (slice(None),)]
+        ] + xdmf_DG0_descrs
+        static_idxs = [(0, ...)] +len(xdmf_DG0_descrs)*[(slice(None),),]
 
         temporal_dataset_descrs = [
             (fxdmf['state/u'], 'vector', 'node'),
@@ -678,6 +686,7 @@ if __name__ == '__main__':
     parser.add_argument("--overwrite-results", type=str, action='extend', nargs='+')
     # parser.add_argument("--default-dt", type=float, default=1.25e-5)
     # parser.add_argument("--default-tf", type=float, default=0.5)
+    parser.add_argument("--run-sim", action='store_true', default=False)
     parser.add_argument("--postprocess", action='store_true', default=False)
     parser.add_argument("--export-xdmf", action='store_true', default=False)
     clargs = parser.parse_args()
@@ -706,7 +715,10 @@ if __name__ == '__main__':
         for param in params:
             in_fpath = f'{out_dir}/{param.to_str()}.h5'
             xdmf_path = (
-                f"vis--vcov{param['vcov']:.2e}--mcov{param['mcov']:.2e}"
+                "vis"
+                f"--vcov{param['vcov']:.4e}"
+                f"--mcov{param['mcov']:.2e}"
+                f"--psub{param['psub']:.2e}"
                 f"--distribution{param['SwellingDistribution']:s}.xdmf"
             )
             # xdmf_path = 'temp.xdmf'
