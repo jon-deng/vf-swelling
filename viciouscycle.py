@@ -160,21 +160,11 @@ def proc_damage_rate(
     return damage
 
 
-def calc_swelling_rate(damage_rate: NDArray) -> NDArray:
-    """
-    Return the swelling rate
-
-    Parameters
-    ----------
-    damage_rate:
-        The damage accumulation rate
-    """
-    K = 1.0
-    return K * damage_rate
-
-
 def proc_swelling_rate(
-    model: Model, fpath: str, damage_measure: str = 'viscous_dissipation'
+    model: Model,
+    fpath: str,
+    damage_measure: str = 'viscous_dissipation',
+    swelling_dmg_growth_rate: float = 1.0
 ) -> NDArray:
     """
     Return the swelling rate for the given conditions
@@ -202,8 +192,8 @@ def proc_swelling_rate(
     """
     with sf.StateFile(model, fpath, mode='r') as f:
         dmg_rate = proc_damage_rate(model, f, damage_measure=damage_measure)
-        swelling_rate = calc_swelling_rate(dmg_rate)
 
+    swelling_rate = swelling_dmg_growth_rate*dmg_rate
     return swelling_rate
 
 
@@ -813,6 +803,8 @@ def integrate_vc_step(
     comp_input_n: Optional[NDArray] = None,
     v_step: float = 0.05,
     damage_measure: str = 'viscous_dissipation',
+    swelling_dmg_growth_rate: float = 1.0,
+    swelling_healing_rate: float = 1.0
 ):
     """
     Integrate the vicious cycle over a single step
@@ -854,7 +846,14 @@ def integrate_vc_step(
         comp_input_0=comp_input_n,
     )
 
-    vd_n = proc_swelling_rate(model, state_fpath_n, damage_measure=damage_measure)
+    vd_n_swell = proc_swelling_rate(
+        model,
+        state_fpath_n,
+        damage_measure=damage_measure,
+        swelling_dmg_growth_rate=swelling_dmg_growth_rate
+    )
+
+    vd_n_heal = -swelling_healing_rate*v_n
 
     with sf.StateFile(model, state_fpath_n, mode='r') as f:
         voice_output = proc_voice_output(f, len(voice_target))
@@ -865,6 +864,7 @@ def integrate_vc_step(
     print(f"Post compensation voice output: {voice_output}")
     print(f"Compensation solver stats: {compensation_solver_info}")
 
+    vd_n = vd_n_swell - vd_n_heal
     dv = v_step * vd_n / vd_n.max()
     v_1 = v_n + dv
     return v_1, comp_input_n
