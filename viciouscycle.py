@@ -622,6 +622,9 @@ def integrate_vc(
     n_start: int = 0,
     n_stop: int = 1,
     v_step: float = 0.05,
+    dt: float=1.0,
+    swelling_dmg_growth_rate=1.0,
+    swelling_healing_rate = 1.0,
     comp_input_0: Optional[NDArray] = None,
     damage_measure: str = 'viscous_dissipation',
     output_dir: str = 'out',
@@ -690,6 +693,9 @@ def integrate_vc(
         n_start=n_start,
         n_stop=n_stop,
         v_step=v_step,
+        dt=dt,
+        swelling_dmg_growth_rate=swelling_dmg_growth_rate,
+        swelling_healing_rate=swelling_healing_rate,
         damage_measure=damage_measure,
         comp_input_0=comp_input_0,
         output_dir=output_dir,
@@ -703,6 +709,9 @@ def resume_integrate_vc(
     n_stop: int,
     v_step: float = 0.05,
     damage_measure: str = 'viscous_dissipation',
+    dt=1.0,
+    swelling_dmg_growth_rate=1.0,
+    swelling_healing_rate=1.0,
     output_dir: str = 'out',
     base_fname: str = 'SwellingStep',
 ):
@@ -750,6 +759,9 @@ def resume_integrate_vc(
         n_stop=n_stop,
         v_step=v_step,
         damage_measure=damage_measure,
+        dt=dt,
+        swelling_dmg_growth_rate=swelling_dmg_growth_rate,
+        swelling_healing_rate=swelling_healing_rate,
         comp_input_0=comp_input_0,
         output_dir=output_dir,
         base_fname=base_fname,
@@ -767,6 +779,9 @@ def integrate_vc_steps(
     n_start: int = 0,
     n_stop: int = 1,
     v_step: float = 0.05,
+    dt=1.0,
+    swelling_dmg_growth_rate=1.0,
+    swelling_healing_rate=1.0,
     damage_measure: str = 'viscous_dissipation',
     comp_input_0: Optional[NDArray] = None,
     output_dir: str = 'out',
@@ -787,6 +802,9 @@ def integrate_vc_steps(
             v_step=v_step,
             damage_measure=damage_measure,
             comp_input_n=comp_input_0,
+            dt=dt,
+            swelling_dmg_growth_rate=swelling_dmg_growth_rate,
+            swelling_healing_rate=swelling_healing_rate
         )
         v_0 = v_1
 
@@ -802,6 +820,7 @@ def integrate_vc_step(
     voicing_time: NDArray,
     comp_input_n: Optional[NDArray] = None,
     v_step: float = 0.05,
+    dt: float = 0.05,
     damage_measure: str = 'viscous_dissipation',
     swelling_dmg_growth_rate: float = 1.0,
     swelling_healing_rate: float = 1.0
@@ -858,15 +877,21 @@ def integrate_vc_step(
     with sf.StateFile(model, state_fpath_n, mode='r') as f:
         voice_output = proc_voice_output(f, len(voice_target))
 
+    vd_n = vd_n_swell - vd_n_heal
+    vd_max = np.max(np.abs(vd_n))
+    dt_target = v_step/vd_max
+
+    dt = min(dt, dt_target)
+    dv = dt * vd_n
+    v_1 = v_n + dv
+
     print("-- Found compensatory input for current swelling --")
     print(f"Voice target: {voice_target}")
     print(f"Compensatory input: {comp_input_n}")
     print(f"Post compensation voice output: {voice_output}")
     print(f"Compensation solver stats: {compensation_solver_info}")
-
-    vd_n = vd_n_swell - vd_n_heal
-    dv = v_step * vd_n / vd_n.max()
-    v_1 = v_n + dv
+    print(f"(avg/max/min) swelling is ({np.mean(v_1):.2e}, {np.max(v_1):.2e}, {np.min(v_1):.2e})")
+    print(f"dt: {dt:.2e}")
     return v_1, comp_input_n
 
 
@@ -924,7 +949,7 @@ if __name__ == '__main__':
     parser.add_argument("--nstop", type=int, default=0)
     cmd_args = parser.parse_args()
 
-    param = main.ExpParam(
+    param = cases.VCExpParam(
         {
             'MeshName': cases.MESH_BASE_NAME,
             'clscale': 0.75,
@@ -933,7 +958,7 @@ if __name__ == '__main__':
             'NZ': 15,
             'Ecov': cases.ECOV,
             'Ebod': cases.EBOD,
-            'vcov': 1,
+            'vcov': 1.0,
             'mcov': 0.0,
             'psub': 400 * 10,
             'dt': 5e-5,
@@ -941,6 +966,8 @@ if __name__ == '__main__':
             'ModifyEffect': '',
             'SwellingDistribution': 'uniform',
             'SwellingModel': 'power',
+            'SwellHealRate': 1.0 * -np.log(0.5)/(5*3600),
+            'SwellDamageRate': 1.0 * 1.0e-12,
         }
     )
     # param = main.ExpParam(
@@ -972,6 +999,8 @@ if __name__ == '__main__':
     ]
 
     if cmd_args.run_vc_sim:
+        healing_rate = param['SwellHealRate']
+        swelling_dmg_growth_rate = param['SwellDamageRate']
 
         # Check that you won't overwrite existing files, excluding the initial state
         if any(path.isfile(fpath) for fpath in fpaths[1:]):
@@ -1008,6 +1037,9 @@ if __name__ == '__main__':
                 output_dir=cmd_args.output_dir,
                 base_fname='SwellingStep',
                 comp_input_0=x_0,
+                dt=1.0,
+                swelling_dmg_growth_rate=swelling_dmg_growth_rate,
+                swelling_healing_rate=healing_rate,
                 damage_measure=cmd_args.damage_measure
             )
         else:
@@ -1017,6 +1049,9 @@ if __name__ == '__main__':
                 n_stop,
                 v_step=dv,
                 output_dir=cmd_args.output_dir,
+                dt=1.0,
+                swelling_dmg_growth_rate=swelling_dmg_growth_rate,
+                swelling_healing_rate=healing_rate,
                 base_fname='SwellingStep',
                 damage_measure=cmd_args.damage_measure
             )

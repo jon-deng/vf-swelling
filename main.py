@@ -60,6 +60,7 @@ def setup_model(param: ExpParam) -> Model:
     else:
         raise ValueError("Parameter 'DZ' must be >= 0")
 
+    swell_model_key = param['SwellingModel']
     if param['SwellingModel'] == 'linear':
         SolidType = solid.SwellingKelvinVoigtWEpitheliumNoShape
     elif param['SwellingModel'] == 'power':

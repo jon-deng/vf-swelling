@@ -27,7 +27,7 @@ EMODS = [{'cover': ECOV, 'body': EBOD}]
 TF = 2 * 5e-5
 DT = 5e-5
 
-PARAM_SPEC = {
+_PARAM_SPEC = {
     'MeshName': str,
     'GA': float,
     'DZ': float,
@@ -45,9 +45,33 @@ PARAM_SPEC = {
     'SwellingModel': str,
 }
 
-PARAM_FORMAT_STRS = {'vcov': '.4e'}
+_PARAM_FORMAT_STRS = {'vcov': '.4e'}
 
-ExpParam = exputils.make_parameters(PARAM_SPEC, PARAM_FORMAT_STRS)
+ExpParam = exputils.make_parameters(_PARAM_SPEC, _PARAM_FORMAT_STRS)
+
+_PARAM_SPEC = {
+    'MeshName': str,
+    'GA': float,
+    'DZ': float,
+    'NZ': int,
+    'clscale': float,
+    'Ecov': float,
+    'Ebod': float,
+    'vcov': float,
+    'mcov': float,
+    'psub': float,
+    'dt': float,
+    'tf': float,
+    'ModifyEffect': str,
+    'SwellingModel': str,
+    'SwellingDistribution': str,
+    'SwellHealRate': float,
+    'SwellDamageRate': float
+}
+
+_PARAM_FORMAT_STRS = {'vcov': '.4e'}
+
+VCExpParam = exputils.make_parameters(_PARAM_SPEC, _PARAM_FORMAT_STRS)
 
 
 def make_exp_params(study_name: str) -> List[ExpParam]:
