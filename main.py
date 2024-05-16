@@ -675,8 +675,8 @@ def get_result_name_to_postprocess(
 def get_model(in_fpath: str) -> Model:
     """Return the model"""
     in_fname = path.splitext(path.split(in_fpath)[-1])[0]
-    params = ExpParam(in_fname)
-    return setup_model(params)
+    param = ExpParam(in_fname)
+    return setup_model(param)
 
 
 if __name__ == '__main__':
