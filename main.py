@@ -79,7 +79,7 @@ def setup_model(param: ExpParam) -> Model:
 
 
 def setup_state_control_prop(
-    params: ExpParam, model: Model, dv: float = 0.01
+    param: ExpParam, model: Model, dv: float = 0.01
 ) -> Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector]:
     """
     Return a (state, controls, prop) tuple defining a transient run
@@ -87,18 +87,18 @@ def setup_state_control_prop(
     ## Set 'basic' model properties
     # These properties don't include the glottal gap since you may/may not
     # want to modify the glottal gap based on the swelling level
-    prop = setup_basic_prop(params, model)
+    prop = setup_basic_prop(param, model)
     model.set_prop(prop)
 
     ## Set the initial state
     # The initial state is based on the post-swelling static configuration
-    state0 = setup_ini_state(params, model, dv=dv)
+    state0 = setup_ini_state(param, model, dv=dv)
 
     # Set the glottal gap based on the post-swelling static configuration
     ndim = model.solid.residual.mesh().topology().dim()
     if (
-        params['ModifyEffect'] == 'const_pregap'
-        or params['ModifyEffect'] == 'const_mass_pregap'
+        param['ModifyEffect'] == 'const_pregap'
+        or param['ModifyEffect'] == 'const_mass_pregap'
     ):
         # Using the `ndim` to space things ensures you get the y-coordinate
         # for both 2D and 3D meshes
@@ -115,7 +115,7 @@ def setup_state_control_prop(
 
     model.set_prop(prop)
 
-    controls = setup_controls(params, model)
+    controls = setup_controls(param, model)
     return state0, controls, prop
 
 
