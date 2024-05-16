@@ -934,7 +934,7 @@ if __name__ == '__main__':
     parser.add_argument("--postprocess", action='store_true')
 
     # Where/how to write results
-    parser.add_argument("--output-dir", type=str, default='out')
+    parser.add_argument("--output-dir", type=str, default='out/vicious_cycle')
     parser.add_argument("--overwrite-results", type=str, action='extend', nargs='+')
 
     # Control which damage measure is used for swelling
@@ -1045,7 +1045,7 @@ if __name__ == '__main__':
                 n_stop=n_stop,
                 v_step=dv,
                 output_dir=cmd_args.output_dir,
-                base_fname='SwellingStep',
+                base_fname=f'DamageRate{damage_rate:.4e}--HealRate{healing_rate:.4e}--Step',
                 comp_input_0=x_0,
                 dt=1.0,
                 swelling_dmg_growth_rate=damage_rate,
@@ -1062,7 +1062,7 @@ if __name__ == '__main__':
                 dt=1.0,
                 swelling_dmg_growth_rate=damage_rate,
                 swelling_healing_rate=healing_rate,
-                base_fname='SwellingStep',
+                base_fname=f'DamageRate{damage_rate:.4e}--HealRate{healing_rate:.4e}--Step',
                 damage_measure=cmd_args.damage_measure
             )
 
