@@ -872,12 +872,13 @@ def integrate_vc_step(
         swelling_dmg_growth_rate=swelling_dmg_growth_rate
     )
 
-    vd_n_heal = -swelling_healing_rate*v_n
+    vd_n_heal = -swelling_healing_rate*(v_n - 1.0)
+    print(vd_n_heal)
 
     with sf.StateFile(model, state_fpath_n, mode='r') as f:
         voice_output = proc_voice_output(f, len(voice_target))
 
-    vd_n = vd_n_swell - vd_n_heal
+    vd_n = vd_n_swell + vd_n_heal
     vd_max = np.max(np.abs(vd_n))
     dt_target = v_step/vd_max
 
@@ -890,7 +891,7 @@ def integrate_vc_step(
     print(f"Compensatory input: {comp_input_n}")
     print(f"Post compensation voice output: {voice_output}")
     print(f"Compensation solver stats: {compensation_solver_info}")
-    print(f"(avg/max/min) swelling is ({np.mean(v_1):.2e}, {np.max(v_1):.2e}, {np.min(v_1):.2e})")
+    print(f"(avg/max/min) swelling is ({np.mean(v_1):.4e}, {np.max(v_1):.4e}, {np.min(v_1):.4e})")
     print(f"dt: {dt:.2e}")
     return v_1, comp_input_n
 
@@ -947,6 +948,13 @@ if __name__ == '__main__':
     parser.add_argument("--dv", type=float, default=0.05)
     parser.add_argument("--nstart", type=int, default=0)
     parser.add_argument("--nstop", type=int, default=0)
+
+    # Swelling rate parameters
+    # The time unit of the vicious cycle is in hours
+    # for '--swelling-heal-rate' `0.5` represents a 50% reduction while `5` represents 5 hours
+    parser.add_argument("--swelling-dmg-rate", type=float, default=0.0)
+    parser.add_argument("--swelling-heal-rate", type=float, default=-np.log(0.5)/(5))
+
     cmd_args = parser.parse_args()
 
     param = cases.VCExpParam(
@@ -966,8 +974,8 @@ if __name__ == '__main__':
             'ModifyEffect': '',
             'SwellingDistribution': 'uniform',
             'SwellingModel': 'power',
-            'SwellHealRate': 1.0 * -np.log(0.5)/(5*3600),
-            'SwellDamageRate': 1.0 * 1.0e-12,
+            'SwellHealRate': cmd_args.swelling_heal_rate,
+            'SwellDamageRate': cmd_args.swelling_dmg_rate,
         }
     )
     # param = main.ExpParam(
@@ -994,14 +1002,16 @@ if __name__ == '__main__':
     dv = cmd_args.dv
     n_start = cmd_args.nstart
     n_stop = cmd_args.nstop
+
+    healing_rate = param['SwellHealRate']
+    damage_rate = param['SwellDamageRate']
     fpaths = [
-        f'{cmd_args.output_dir}/SwellingStep{n}.h5' for n in range(n_start, n_stop)
+        f'{cmd_args.output_dir}/'
+        f'DamageRate{damage_rate:.4e}--HealRate{healing_rate:.4e}--Step{n:d}.h5'
+        for n in range(n_start, n_stop)
     ]
 
     if cmd_args.run_vc_sim:
-        healing_rate = param['SwellHealRate']
-        swelling_dmg_growth_rate = param['SwellDamageRate']
-
         # Check that you won't overwrite existing files, excluding the initial state
         if any(path.isfile(fpath) for fpath in fpaths[1:]):
             raise RuntimeError(
@@ -1017,7 +1027,7 @@ if __name__ == '__main__':
         voicing_time = cmd_args.dt * np.arange(cmd_args.nt)
 
         # `v0` and `x0` are the initial swelling field and compensatory inputs
-        v_0 = np.ones(const_prop['v_swelling'].shape)
+        v_0 = np.array(const_prop['v_swelling'][:])
         x_0 = np.array([0, 0])
         x_0 = np.array([0])
 
@@ -1038,7 +1048,7 @@ if __name__ == '__main__':
                 base_fname='SwellingStep',
                 comp_input_0=x_0,
                 dt=1.0,
-                swelling_dmg_growth_rate=swelling_dmg_growth_rate,
+                swelling_dmg_growth_rate=damage_rate,
                 swelling_healing_rate=healing_rate,
                 damage_measure=cmd_args.damage_measure
             )
@@ -1050,7 +1060,7 @@ if __name__ == '__main__':
                 v_step=dv,
                 output_dir=cmd_args.output_dir,
                 dt=1.0,
-                swelling_dmg_growth_rate=swelling_dmg_growth_rate,
+                swelling_dmg_growth_rate=damage_rate,
                 swelling_healing_rate=healing_rate,
                 base_fname='SwellingStep',
                 damage_measure=cmd_args.damage_measure
