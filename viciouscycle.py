@@ -62,7 +62,7 @@ def proc_time(f: sf.StateFile) -> NDArray:
     return f.get_times()
 
 
-def proc_voice_output(f: sf.StateFile, n: int) -> NDArray:
+def proc_voice_output(f: sf.StateFile, n: int) -> Tuple[NDArray, Mapping[str, NDArray]]:
     """
     Return voice outputs (RMS pressure, fundamental frequency)
     """
@@ -86,7 +86,7 @@ def proc_voice_output(f: sf.StateFile, n: int) -> NDArray:
     _voice_output = (prms, fund_freq)
     # voice_output = np.array([prms, fund_freq])
     voice_output = np.array(_voice_output[:n])
-    return voice_output
+    return voice_output, {'t': t, 'q': q}
 
 
 def calc_prms(t: NDArray, q: NDArray) -> float:
@@ -351,7 +351,7 @@ def make_voice_output_jac(
                 const_prop,
                 voicing_time,
             )
-            voice_output1 = proc_voice_output(f, len(comp_input))
+            voice_output1 = proc_voice_output(f, len(comp_input))[0]
 
         return (voice_output1 - voice_output_0) / np.linalg.norm(dinput)
 
@@ -440,7 +440,7 @@ def solve_comp_input(
                 forward.integrate(model, f, ini_state, [control], prop, voicing_time)
 
         with sf.StateFile(model, fpath, mode='r') as f:
-            y = proc_voice_output(f, len(comp_input_0))
+            y = proc_voice_output(f, len(comp_input_0))[0]
 
         def assem_res():
             y1 = voice_target
@@ -679,7 +679,7 @@ def integrate_vc(
             _, solve_info = forward.integrate(
                 model, f, ini_state, [control], prop, voicing_time, use_tqdm=True
             )
-            voice_target = proc_voice_output(f, len(comp_input_0))
+            voice_target = proc_voice_output(f, len(comp_input_0))[0]
 
     ## Loop through steps of the vicious cycle (VC)
     integrate_vc_steps(
@@ -734,7 +734,7 @@ def resume_integrate_vc(
     """
     state_fpath_0 = f'{output_dir}/{base_fname}{n_start}.h5'
     with sf.StateFile(model, state_fpath_0, mode='r') as f:
-        voice_target = proc_voice_output(f, 1)
+        voice_target = proc_voice_output(f, 1)[0]
         const_ini_state = f.get_state(0)
         const_control = f.get_control(0)
         const_prop = f.get_prop()
@@ -873,10 +873,9 @@ def integrate_vc_step(
     )
 
     vd_n_heal = -swelling_healing_rate*(v_n - 1.0)
-    print(vd_n_heal)
 
     with sf.StateFile(model, state_fpath_n, mode='r') as f:
-        voice_output = proc_voice_output(f, len(voice_target))
+        voice_output, info = proc_voice_output(f, len(voice_target))
 
     vd_n = vd_n_swell + vd_n_heal
     vd_max = np.max(np.abs(vd_n))
@@ -892,6 +891,9 @@ def integrate_vc_step(
     print(f"Post compensation voice output: {voice_output}")
     print(f"Compensation solver stats: {compensation_solver_info}")
     print(f"(avg/max/min) swelling is ({np.mean(v_1):.4e}, {np.max(v_1):.4e}, {np.min(v_1):.4e})")
+    print("Healing-induced swelling rate:", vd_n_heal)
+    print("Damage-induced swelling rate:", vd_n_swell)
+    print("q:", info['q'])
     print(f"dt: {dt:.2e}")
     return v_1, comp_input_n
 
