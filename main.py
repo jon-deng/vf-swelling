@@ -438,8 +438,11 @@ def proc_glottal_flow_rate(f: sf.StateFile) -> NDArray:
     """
     num_fluid = len(f.model.fluids)
 
-    # Compute q as a weighted average over all coronal cross-sections
-    qs = f.file[f'state/fluid0.q']
+    # Compute `q` as a weighted average over all coronal cross-sections
+    if num_fluid > 1:
+        qs = np.array([f.get_state()[f'state/fluid{n}.q'][0] for n in range(num_fluid)])
+    else:
+        qs = f.file[f'state/fluid0.q']
 
     # Assign full weights to all coronal sections with neighbours and
     # half-weights to the anterior/posterior coronal sections
