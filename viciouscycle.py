@@ -622,6 +622,7 @@ def integrate_vc(
     n_start: int = 0,
     n_stop: int = 1,
     v_step: float = 0.05,
+    t_0: float=0.0,
     dt: float=1.0,
     swelling_dmg_growth_rate=1.0,
     swelling_healing_rate = 1.0,
@@ -693,6 +694,7 @@ def integrate_vc(
         n_start=n_start,
         n_stop=n_stop,
         v_step=v_step,
+        t_0=t_0,
         dt=dt,
         swelling_dmg_growth_rate=swelling_dmg_growth_rate,
         swelling_healing_rate=swelling_healing_rate,
@@ -739,6 +741,7 @@ def resume_integrate_vc(
         const_control = f.get_control(0)
         const_prop = f.get_prop()
         voicing_time = f.get_times()
+        t_0 = f.file['ViciousCycle/time'][()]
     v_0 = np.array(const_prop.sub['v_swelling'])
 
     ## Loop through steps of the vicious cycle (VC)
@@ -759,6 +762,7 @@ def resume_integrate_vc(
         n_stop=n_stop,
         v_step=v_step,
         damage_measure=damage_measure,
+        t_0=t_0,
         dt=dt,
         swelling_dmg_growth_rate=swelling_dmg_growth_rate,
         swelling_healing_rate=swelling_healing_rate,
@@ -779,6 +783,7 @@ def integrate_vc_steps(
     n_start: int = 0,
     n_stop: int = 1,
     v_step: float = 0.05,
+    t_0=0.0,
     dt=1.0,
     swelling_dmg_growth_rate=1.0,
     swelling_healing_rate=1.0,
@@ -790,7 +795,7 @@ def integrate_vc_steps(
     for n in tqdm(range(n_start, n_stop), desc='Vicious cycle integration'):
 
         state_fpath_n = f'{output_dir}/{base_fname}{n}.h5'
-        v_1, comp_input_0 = integrate_vc_step(
+        v_1, t_1, comp_input_0 = integrate_vc_step(
             model,
             state_fpath_n,
             v_0,
@@ -799,14 +804,16 @@ def integrate_vc_steps(
             const_control,
             const_prop,
             voicing_time,
-            v_step=v_step,
+            max_dv=v_step,
             damage_measure=damage_measure,
             comp_input_n=comp_input_0,
+            t_0=t_0,
             dt=dt,
             swelling_dmg_growth_rate=swelling_dmg_growth_rate,
             swelling_healing_rate=swelling_healing_rate
         )
         v_0 = v_1
+        t_0 = t_1
 
 
 def integrate_vc_step(
@@ -819,8 +826,9 @@ def integrate_vc_step(
     const_prop: bv.BlockVector,
     voicing_time: NDArray,
     comp_input_n: Optional[NDArray] = None,
-    v_step: float = 0.05,
+    t_0: float = 0,
     dt: float = 0.05,
+    max_dv: float = 0.05,
     damage_measure: str = 'viscous_dissipation',
     swelling_dmg_growth_rate: float = 1.0,
     swelling_healing_rate: float = 1.0
@@ -865,27 +873,33 @@ def integrate_vc_step(
         comp_input_0=comp_input_n,
     )
 
-    vd_n_swell, dmg_rate = proc_swelling_rate(
+    dv_dt_n_swell, dmg_rate = proc_swelling_rate(
         model,
         state_fpath_n,
         damage_measure=damage_measure,
         swelling_dmg_growth_rate=swelling_dmg_growth_rate
     )
-    damage_rate = dmg_rate
-    # with h5py.File(state_fpath_n, mode='a') as f:
 
-    vd_n_heal = -swelling_healing_rate*(v_n - 1.0)
+    dv_dt_n_heal = -swelling_healing_rate*(v_n - 1.0)
 
     with sf.StateFile(model, state_fpath_n, mode='r') as f:
         voice_output, info = proc_voice_output(f, len(voice_target))
 
-    vd_n = vd_n_swell + vd_n_heal
-    vd_max = np.max(np.abs(vd_n))
-    dt_max = v_step/vd_max
+    dv_dt_n = dv_dt_n_swell + dv_dt_n_heal
+    max_dv_dt = np.max(np.abs(dv_dt_n))
+    dt_max = max_dv/max_dv_dt
 
     dt = min(dt, dt_max)
-    dv = dt * vd_n
+    dv = dt * dv_dt_n
     v_1 = v_n + dv
+    t_1 = t_0 + dt
+
+    with h5py.File(state_fpath_n, mode='a') as f:
+        group = f.file['ViciousCycle']
+        group['damage_rate'] = dmg_rate
+        group['time'] = t_0
+        group['dv_dt_healing'] = dv_dt_n_heal
+        group['dv_dt_damage'] = dv_dt_n_swell
 
     print("-- Found compensatory input for current swelling --")
     print(f"Voice target: {voice_target}")
@@ -893,11 +907,11 @@ def integrate_vc_step(
     print(f"Post compensation voice output: {voice_output}")
     print(f"Compensation solver stats: {compensation_solver_info}")
     print(f"(avg/max/min) swelling is ({np.mean(v_1):.4e}, {np.max(v_1):.4e}, {np.min(v_1):.4e})")
-    print("Healing-induced swelling rate:", vd_n_heal)
-    print("Damage-induced swelling rate:", vd_n_swell)
+    print("Healing-induced swelling rate:", dv_dt_n_heal)
+    print("Damage-induced swelling rate:", dv_dt_n_swell)
     print("q:", info['q'])
     print(f"dt: {dt:.2e}")
-    return v_1, comp_input_n
+    return v_1, t_1, comp_input_n
 
 
 def postprocess(
