@@ -125,7 +125,7 @@ def calc_prms(t: NDArray, q: NDArray) -> float:
 
 
 def proc_damage_rate(
-    model: Model, f: sf.StateFile, damage_measure: str = 'viscous_dissipation'
+    model: Model, f: sf.StateFile, damage_measure: str = 'field.tavg_viscous_dissipation'
 ) -> NDArray:
     """
     Return the damage rate
@@ -141,13 +141,13 @@ def proc_damage_rate(
     dx = model.solid.residual.measure('dx')
     mesh = model.solid.residual.mesh()
     fspace = dfn.FunctionSpace(mesh, 'DG', 0)
-    if damage_measure == 'viscous_dissipation':
+    if damage_measure == 'field.tavg_viscous_dissipation':
         state_measure = slsig.ViscousDissipationField(model, dx=dx, fspace=fspace)
 
         def measure(f):
             time_mean = TimeSeriesStats(state_measure).mean(f, range(f.size // 2, f.size))
             return time_mean
-    elif damage_measure == 'strain_energy':
+    elif damage_measure == 'field.tmax_strain_energy':
         state_measure = slsig.StrainEnergy(model, dx=dx, fspace=fspace)
 
         def measure(f):
@@ -194,7 +194,7 @@ def proc_swelling_rate(
         dmg_rate = proc_damage_rate(model, f, damage_measure=damage_measure)
 
     swelling_rate = swelling_dmg_growth_rate*dmg_rate
-    return swelling_rate
+    return swelling_rate, dmg_rate
 
 
 def map_vc_input_to_model_input(
@@ -865,12 +865,14 @@ def integrate_vc_step(
         comp_input_0=comp_input_n,
     )
 
-    vd_n_swell = proc_swelling_rate(
+    vd_n_swell, dmg_rate = proc_swelling_rate(
         model,
         state_fpath_n,
         damage_measure=damage_measure,
         swelling_dmg_growth_rate=swelling_dmg_growth_rate
     )
+    damage_rate = dmg_rate
+    # with h5py.File(state_fpath_n, mode='a') as f:
 
     vd_n_heal = -swelling_healing_rate*(v_n - 1.0)
 
@@ -879,9 +881,9 @@ def integrate_vc_step(
 
     vd_n = vd_n_swell + vd_n_heal
     vd_max = np.max(np.abs(vd_n))
-    dt_target = v_step/vd_max
+    dt_max = v_step/vd_max
 
-    dt = min(dt, dt_target)
+    dt = min(dt, dt_max)
     dv = dt * vd_n
     v_1 = v_n + dv
 
