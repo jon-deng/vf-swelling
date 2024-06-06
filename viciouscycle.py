@@ -956,7 +956,7 @@ if __name__ == '__main__':
     parser.add_argument("--overwrite-results", type=str, action='extend', nargs='+')
 
     # Control which damage measure is used for swelling
-    parser.add_argument("--damage-measure", type=str, default='viscous_dissipation')
+    parser.add_argument("--damage-measure", type=str, default='field.tavg_viscous_rate')
 
     # Voicing time parameters
     parser.add_argument("--dt", type=float, default=5e-5)
@@ -1023,9 +1023,10 @@ if __name__ == '__main__':
 
     healing_rate = param['SwellHealRate']
     damage_rate = param['SwellDamageRate']
+
+    base_fname = f'DamageMeasure{cmd_args.damage_measure}--DamageRate{damage_rate:.4e}--HealRate{healing_rate:.4e}--Step'
     fpaths = [
-        f'{cmd_args.output_dir}/'
-        f'DamageRate{damage_rate:.4e}--HealRate{healing_rate:.4e}--Step{n:d}.h5'
+        f'{cmd_args.output_dir}/{base_fname}{n:d}.h5'
         for n in range(n_start, n_stop)
     ]
 
@@ -1063,7 +1064,7 @@ if __name__ == '__main__':
                 n_stop=n_stop,
                 dv_max=dv,
                 output_dir=cmd_args.output_dir,
-                base_fname=f'DamageRate{damage_rate:.4e}--HealRate{healing_rate:.4e}--Step',
+                base_fname=base_fname,
                 comp_input_0=x_0,
                 dt=1.0,
                 swelling_dmg_growth_rate=damage_rate,
@@ -1080,7 +1081,7 @@ if __name__ == '__main__':
                 dt=1.0,
                 swelling_dmg_growth_rate=damage_rate,
                 swelling_healing_rate=healing_rate,
-                base_fname=f'DamageRate{damage_rate:.4e}--HealRate{healing_rate:.4e}--Step',
+                base_fname=base_fname,
                 damage_measure=cmd_args.damage_measure
             )
 
