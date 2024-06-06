@@ -621,7 +621,7 @@ def integrate_vc(
     voicing_time: NDArray,
     n_start: int = 0,
     n_stop: int = 1,
-    v_step: float = 0.05,
+    dv_max: float = 0.05,
     t_0: float=0.0,
     dt: float=1.0,
     swelling_dmg_growth_rate=1.0,
@@ -653,8 +653,8 @@ def integrate_vc(
         The initial state index of the vicious cycle
     n_stop: int
         The final state index of the vicious cycle
-    v_step: float
-        The increment in swelling to take for each step of the vicious cycle
+    dv_max: float
+        The maximum increment in swelling for a vicious cycle step
     comp_input_0: Optional[NDArray]
         A guess for the initial compensatory input
 
@@ -693,7 +693,7 @@ def integrate_vc(
         voicing_time,
         n_start=n_start,
         n_stop=n_stop,
-        v_step=v_step,
+        dv_max=dv_max,
         t_0=t_0,
         dt=dt,
         swelling_dmg_growth_rate=swelling_dmg_growth_rate,
@@ -709,7 +709,7 @@ def resume_integrate_vc(
     model: Model,
     n_start: int,
     n_stop: int,
-    v_step: float = 0.05,
+    dv_max: float = 0.05,
     damage_measure: str = 'viscous_dissipation',
     dt=1.0,
     swelling_dmg_growth_rate=1.0,
@@ -760,7 +760,7 @@ def resume_integrate_vc(
         voicing_time,
         n_start=n_start,
         n_stop=n_stop,
-        v_step=v_step,
+        dv_max=dv_max,
         damage_measure=damage_measure,
         t_0=t_0,
         dt=dt,
@@ -782,7 +782,7 @@ def integrate_vc_steps(
     voicing_time: NDArray,
     n_start: int = 0,
     n_stop: int = 1,
-    v_step: float = 0.05,
+    dv_max: float = 0.05,
     t_0=0.0,
     dt=1.0,
     swelling_dmg_growth_rate=1.0,
@@ -804,7 +804,7 @@ def integrate_vc_steps(
             const_control,
             const_prop,
             voicing_time,
-            max_dv=v_step,
+            dv_max=dv_max,
             damage_measure=damage_measure,
             comp_input_n=comp_input_0,
             t_0=t_0,
@@ -828,7 +828,7 @@ def integrate_vc_step(
     comp_input_n: Optional[NDArray] = None,
     t_0: float = 0,
     dt: float = 0.05,
-    max_dv: float = 0.05,
+    dv_max: float = 0.05,
     damage_measure: str = 'viscous_dissipation',
     swelling_dmg_growth_rate: float = 1.0,
     swelling_healing_rate: float = 1.0
@@ -887,7 +887,7 @@ def integrate_vc_step(
 
     dv_dt_n = dv_dt_n_swell + dv_dt_n_heal
     max_dv_dt = np.max(np.abs(dv_dt_n))
-    dt_max = max_dv/max_dv_dt
+    dt_max = dv_max/max_dv_dt
 
     dt = min(dt, dt_max)
     dv = dt * dv_dt_n
@@ -1061,7 +1061,7 @@ if __name__ == '__main__':
                 voicing_time,
                 n_start=n_start,
                 n_stop=n_stop,
-                v_step=dv,
+                dv_max=dv,
                 output_dir=cmd_args.output_dir,
                 base_fname=f'DamageRate{damage_rate:.4e}--HealRate{healing_rate:.4e}--Step',
                 comp_input_0=x_0,
@@ -1075,7 +1075,7 @@ if __name__ == '__main__':
                 model,
                 n_start,
                 n_stop,
-                v_step=dv,
+                dv_max=dv,
                 output_dir=cmd_args.output_dir,
                 dt=1.0,
                 swelling_dmg_growth_rate=damage_rate,
