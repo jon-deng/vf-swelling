@@ -895,11 +895,12 @@ def integrate_vc_step(
     t_1 = t_0 + dt
 
     with h5py.File(state_fpath_n, mode='a') as f:
-        group = f.file['ViciousCycle']
+        group = f.file.require_group('ViciousCycle')
         group['damage_rate'] = dmg_rate
         group['time'] = t_0
         group['dv_dt_healing'] = dv_dt_n_heal
         group['dv_dt_damage'] = dv_dt_n_swell
+        group['voice_target'] = voice_target
 
     print("-- Found compensatory input for current swelling --")
     print(f"Voice target: {voice_target}")
@@ -907,8 +908,14 @@ def integrate_vc_step(
     print(f"Post compensation voice output: {voice_output}")
     print(f"Compensation solver stats: {compensation_solver_info}")
     print(f"(avg/max/min) swelling is ({np.mean(v_1):.4e}, {np.max(v_1):.4e}, {np.min(v_1):.4e})")
-    print("Healing-induced swelling rate:", dv_dt_n_heal)
-    print("Damage-induced swelling rate:", dv_dt_n_swell)
+    print(
+        "(avg/max/min) Healing-induced swelling rate: "
+        f"({np.mean(dv_dt_n_heal):.4e}, {np.max(dv_dt_n_heal):.4e}, {np.min(dv_dt_n_heal):.4e})"
+    )
+    print(
+        "(avg/max/min) Damage-induced swelling rate: "
+        f"({np.mean(dv_dt_n_swell):.4e}, {np.max(dv_dt_n_swell):.4e}, {np.min(dv_dt_n_swell):.4e})"
+    )
     print("q:", info['q'])
     print(f"dt: {dt:.2e}")
     return v_1, t_1, comp_input_n
@@ -956,7 +963,7 @@ if __name__ == '__main__':
     parser.add_argument("--overwrite-results", type=str, action='extend', nargs='+')
 
     # Control which damage measure is used for swelling
-    parser.add_argument("--damage-measure", type=str, default='field.tavg_viscous_rate')
+    parser.add_argument("--damage-measure", type=str, default='field.tavg_viscous_dissipation')
 
     # Voicing time parameters
     parser.add_argument("--dt", type=float, default=5e-5)
