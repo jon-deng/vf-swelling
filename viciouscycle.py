@@ -207,9 +207,7 @@ def map_vc_input_to_model_input(
     model: Model,
     v: NDArray,
     comp_input: NDArray,
-    const_ini_state: bv.BlockVector,
-    const_control: bv.BlockVector,
-    const_prop: bv.BlockVector,
+    const_model_args: Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector]
 ) -> Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector, SolverInfo]:
     """
     Return model inputs from vicious cycle inputs
@@ -231,6 +229,7 @@ def map_vc_input_to_model_input(
     const_ini_state, const_control, const_prop: bv.BlockVector
         Any constant values of the model inputs
     """
+    const_ini_state, const_control, const_prop = const_model_args
     # `comp_input[0]` corresponds to an increment in subglottal pressure
     control = const_control.copy()
     for n in range(len(model.fluids)):
@@ -294,9 +293,7 @@ def make_voice_output_jac(
     voice_output_0: NDArray,
     v: NDArray,
     comp_input: NDArray,
-    const_ini_state: bv.BlockVector,
-    const_control: bv.BlockVector,
-    const_prop: bv.BlockVector,
+    const_model_args: Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector],
     voicing_time: NDArray,
     fpath: str = 'tmp.h5',
 ) -> NDArray:
@@ -333,8 +330,9 @@ def make_voice_output_jac(
     """
     # Compute the swollen initial state once and re-use it
     ini_state, *_ = map_vc_input_to_model_input(
-        model, v, comp_input, const_ini_state, const_control, const_prop
+        model, v, comp_input, const_model_args
     )
+    _model_args = (ini_state,) + const_model_args[1:]
 
     # Calculate voice output sensitivity to phonation parameters
     # with a FD approximation
@@ -352,9 +350,7 @@ def make_voice_output_jac(
                 f,
                 v,
                 comp_input + dinput,
-                ini_state,
-                const_control,
-                const_prop,
+                _model_args,
                 voicing_time,
             )
             voice_output1 = proc_voice_output(f, len(comp_input))[0]
@@ -373,9 +369,7 @@ def solve_comp_input(
     fpath: str,
     v: NDArray,
     voice_target: NDArray,
-    const_ini_state: bv.BlockVector,
-    const_control: bv.BlockVector,
-    const_prop: bv.BlockVector,
+    const_model_args: Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector],
     voicing_time: NDArray,
     comp_input_0: Optional[NDArray] = None,
 ) -> Tuple[str, bv.BlockVector, SolverInfo]:
@@ -412,16 +406,18 @@ def solve_comp_input(
     # ; you only have to compute it once because the swelling magnitude remains
     # constant
     const_ini_state, *_ = map_vc_input_to_model_input(
-        model, v, comp_input_0, const_ini_state, const_control, const_prop
+        model, v, comp_input_0, const_model_args
     )
 
     # Use an iterative Newton method to find the appropriate compensatory
     # adjustments
+    const_model_args = (const_ini_state,) + const_model_args[1:]
     def lin_subproblem(x):
         # Get model parameters for current guess `x`
         ini_state, control, prop, _ = map_vc_input_to_model_input(
-            model, v, x, const_ini_state, const_control, const_prop
+            model, v, x, const_model_args
         )
+        _model_args = (ini_state, control, prop)
 
         # Check whether an existing voicing simulation exists for the current guess
         existing_voicing_sim = False
@@ -459,9 +455,7 @@ def solve_comp_input(
                 y,
                 v,
                 x,
-                ini_state,
-                const_control,
-                const_prop,
+                const_model_args,
                 voicing_time,
                 fpath=f'{path_head}--tmp{path_tail}',
             )
@@ -493,9 +487,7 @@ def integrate(
     f: sf.StateFile,
     v: NDArray,
     comp_input: NDArray,
-    const_ini_state: bv.BlockVector,
-    const_control: bv.BlockVector,
-    const_prop: bv.BlockVector,
+    const_model_args: Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector],
     voicing_time: NDArray,
 ) -> Tuple[bv.BlockVector, SolverInfo]:
     """
@@ -518,7 +510,7 @@ def integrate(
         A simulation time vector
     """
     ini_state, control, prop, _ = map_vc_input_to_model_input(
-        model, v, comp_input, const_ini_state, const_control, const_prop
+        model, v, comp_input, const_model_args
     )
     return forward.integrate(
         model, f, ini_state, [control], prop, voicing_time, use_tqdm=True
@@ -621,9 +613,7 @@ def integrate_vc(
     model: Model,
     v_0: NDArray,
     voice_target: Union[NDArray, None],
-    const_ini_state: bv.BlockVector,
-    const_control: bv.BlockVector,
-    const_prop: bv.BlockVector,
+    const_model_args: Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector],
     voicing_time: NDArray,
     n_start: int = 0,
     n_stop: int = 1,
@@ -651,7 +641,7 @@ def integrate_vc(
 
         If no target voice output is given, it is assumed that the target
         voice output is that for the initial condition.
-    const_ini_state, const_control, const_prop: bv.BlockVector
+    const_model_args: bv.BlockVector
         Constant values for the model initial state, control, and property vectors
     voicing_time: NDArray
         A simulation time vector
@@ -670,9 +660,10 @@ def integrate_vc(
     base_fname: str
         The base filename
     """
+
     if comp_input_0 is None and voice_target is None:
         comp_input_0 = np.zeros(1)
-    elif comp_input_0 is None and voice_target is not None:
+    # elif comp_input_0 is None and voice_target is not None:
         comp_input_0 = np.zeros(voice_target.shape)
 
     # Establish the voice target if none is provided
@@ -680,7 +671,7 @@ def integrate_vc(
         state_fpath_0 = f'{output_dir}/{base_fname}{n_start}.h5'
 
         ini_state, control, prop, _ = map_vc_input_to_model_input(
-            model, v_0, comp_input_0, const_ini_state, const_control, const_prop
+            model, v_0, comp_input_0, const_model_args
         )
         with sf.StateFile(model, state_fpath_0, mode='w') as f:
             _, solve_info = forward.integrate(
@@ -693,9 +684,7 @@ def integrate_vc(
         model,
         v_0,
         voice_target,
-        const_ini_state,
-        const_control,
-        const_prop,
+        const_model_args,
         voicing_time,
         n_start=n_start,
         n_stop=n_stop,
@@ -749,6 +738,7 @@ def resume_integrate_vc(
         voicing_time = f.get_times()
         t_0 = f.file['ViciousCycle/time'][()]
     v_0 = np.array(const_prop.sub['v_swelling'])
+    const_model_args = (const_ini_state, const_control, const_prop)
 
     ## Loop through steps of the vicious cycle (VC)
     # comp_input_n = comp_input_0
@@ -760,9 +750,7 @@ def resume_integrate_vc(
         model,
         v_0,
         voice_target,
-        const_ini_state,
-        const_control,
-        const_prop,
+        const_model_args,
         voicing_time,
         n_start=n_start,
         n_stop=n_stop,
@@ -782,9 +770,7 @@ def integrate_vc_steps(
     model: Model,
     v_0: NDArray,
     voice_target: Union[NDArray, None],
-    const_ini_state: bv.BlockVector,
-    const_control: bv.BlockVector,
-    const_prop: bv.BlockVector,
+    const_model_args: Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector],
     voicing_time: NDArray,
     n_start: int = 0,
     n_stop: int = 1,
@@ -806,9 +792,7 @@ def integrate_vc_steps(
             state_fpath_n,
             v_0,
             voice_target,
-            const_ini_state,
-            const_control,
-            const_prop,
+            const_model_args,
             voicing_time,
             dv_max=dv_max,
             damage_measure=damage_measure,
@@ -827,9 +811,7 @@ def integrate_vc_step(
     state_fpath_n: str,
     v_n: NDArray,
     voice_target: NDArray,
-    const_ini_state: bv.BlockVector,
-    const_control: bv.BlockVector,
-    const_prop: bv.BlockVector,
+    const_model_args: Tuple[bv.BlockVector, bv.BlockVector, bv.BlockVector],
     voicing_time: NDArray,
     comp_input_n: Optional[NDArray] = None,
     t_0: float = 0,
@@ -855,7 +837,7 @@ def integrate_vc_step(
 
         If no target voice output is given, it is assumed that the target
         voice output is that for the initial condition.
-    const_ini_state, const_control, const_prop: bv.BlockVector
+    const_model_args: bv.BlockVector
         Constant values for the model initial state, control, and property vectors
     voicing_time: NDArray
         A simulation time vector
@@ -872,9 +854,7 @@ def integrate_vc_step(
         state_fpath_n,
         v_n,
         voice_target,
-        const_ini_state,
-        const_control,
-        const_prop,
+        const_model_args,
         voicing_time,
         comp_input_0=comp_input_n,
     )
@@ -982,7 +962,7 @@ if __name__ == '__main__':
     # Vicious cycle integration parameters
     parser.add_argument("--dv", type=float, default=0.05)
     parser.add_argument("--nstart", type=int, default=0)
-    parser.add_argument("--nstop", type=int, default=0)
+    parser.add_argument("--nstop", type=int, default=1)
 
     # Swelling rate parameters
     # The time unit of the vicious cycle is in hours
@@ -1068,13 +1048,12 @@ if __name__ == '__main__':
 
         fpath_0 = fpaths[0]
         if not path.isfile(fpath_0):
+            const_model_args = (const_ini_state, const_controls[0], const_prop)
             integrate_vc(
                 model,
                 v_0,
                 None,
-                const_ini_state,
-                const_controls[0],
-                const_prop,
+                const_model_args,
                 voicing_time,
                 n_start=n_start,
                 n_stop=n_stop,
