@@ -66,7 +66,7 @@ _PARAM_SPEC = {
     'SwellingModel': str,
     'SwellingDistribution': str,
     'SwellHealRate': float,
-    'SwellDamageRate': float
+    'SwellDamageRate': float,
 }
 
 _PARAM_FORMAT_STRS = {'vcov': '.4e'}

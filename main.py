@@ -514,9 +514,15 @@ def postprocess_xdmf(model, param: ExpParam, xdmf_path: str, overwrite: bool = F
         formats += len(export_labels) * [function_space]
 
         function_space = dfn.FunctionSpace(mesh, 'DG', 0)
-        export_labels = ['field.tavg_viscous_rate', 'field.tavg_strain_energy', 'field.growth_rate']
+        export_labels = [
+            'field.tavg_viscous_rate',
+            'field.tavg_strain_energy',
+            'field.growth_rate',
+        ]
         # Account for the missing 'field.growth_rate' key for some measures
-        export_labels = [label for label in export_labels if f'{param.to_str()}/{label}' in fpost]
+        export_labels = [
+            label for label in export_labels if f'{param.to_str()}/{label}' in fpost
+        ]
         labels += export_labels
         datasets += [fpost[f'{param.to_str()}/{label}'] for label in export_labels]
         formats += len(export_labels) * [function_space]
@@ -524,9 +530,15 @@ def postprocess_xdmf(model, param: ExpParam, xdmf_path: str, overwrite: bool = F
         xdmfutils.export_mesh_values(datasets, formats, fxdmf, output_names=labels)
 
         # Annotate the mesh values with an XDMF file
-        xdmf_DG0_labels = ['field.tavg_viscous_rate', 'field.tavg_strain_energy', 'field.growth_rate']
+        xdmf_DG0_labels = [
+            'field.tavg_viscous_rate',
+            'field.tavg_strain_energy',
+            'field.growth_rate',
+        ]
         xdmf_DG0_labels = [label for label in export_labels if label in fxdmf]
-        xdmf_DG0_descrs = [(fxdmf[label], 'scalar', 'Cell') for label in xdmf_DG0_labels]
+        xdmf_DG0_descrs = [
+            (fxdmf[label], 'scalar', 'Cell') for label in xdmf_DG0_labels
+        ]
 
         # print(f"Exporting case: {param.to_str()}")
         # print(f"Exporting post-processed labels: {xdmf_DG0_labels}")
@@ -534,7 +546,9 @@ def postprocess_xdmf(model, param: ExpParam, xdmf_path: str, overwrite: bool = F
         static_dataset_descrs = [
             (fxdmf['state/u'], 'vector', 'node'),
         ] + xdmf_DG0_descrs
-        static_idxs = [(0, ...)] +len(xdmf_DG0_descrs)*[(slice(None),),]
+        static_idxs = [(0, ...)] + len(xdmf_DG0_descrs) * [
+            (slice(None),),
+        ]
 
         temporal_dataset_descrs = [
             (fxdmf['state/u'], 'vector', 'node'),

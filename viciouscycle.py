@@ -125,7 +125,9 @@ def calc_prms(t: NDArray, q: NDArray) -> float:
 
 
 def proc_damage_rate(
-    model: Model, f: sf.StateFile, damage_measure: str = 'field.tavg_viscous_dissipation'
+    model: Model,
+    f: sf.StateFile,
+    damage_measure: str = 'field.tavg_viscous_dissipation',
 ) -> NDArray:
     """
     Return the damage rate
@@ -145,14 +147,18 @@ def proc_damage_rate(
         state_measure = slsig.ViscousDissipationField(model, dx=dx, fspace=fspace)
 
         def measure(f):
-            time_mean = TimeSeriesStats(state_measure).mean(f, range(f.size // 2, f.size))
+            time_mean = TimeSeriesStats(state_measure).mean(
+                f, range(f.size // 2, f.size)
+            )
             return time_mean
+
     elif damage_measure == 'field.tmax_strain_energy':
         state_measure = slsig.StrainEnergy(model, dx=dx, fspace=fspace)
 
         def measure(f):
             time_max = TimeSeriesStats(state_measure).max(f, range(f.size // 2, f.size))
             return time_max
+
     else:
         raise ValueError(f"Unknown damage measure '{damage_measure}'")
 
@@ -164,7 +170,7 @@ def proc_swelling_rate(
     model: Model,
     fpath: str,
     damage_measure: str = 'viscous_dissipation',
-    swelling_dmg_growth_rate: float = 1.0
+    swelling_dmg_growth_rate: float = 1.0,
 ) -> NDArray:
     """
     Return the swelling rate for the given conditions
@@ -193,7 +199,7 @@ def proc_swelling_rate(
     with sf.StateFile(model, fpath, mode='r') as f:
         dmg_rate = proc_damage_rate(model, f, damage_measure=damage_measure)
 
-    swelling_rate = swelling_dmg_growth_rate*dmg_rate
+    swelling_rate = swelling_dmg_growth_rate * dmg_rate
     return swelling_rate, dmg_rate
 
 
@@ -622,10 +628,10 @@ def integrate_vc(
     n_start: int = 0,
     n_stop: int = 1,
     dv_max: float = 0.05,
-    t_0: float=0.0,
-    dt: float=1.0,
+    t_0: float = 0.0,
+    dt: float = 1.0,
     swelling_dmg_growth_rate=1.0,
-    swelling_healing_rate = 1.0,
+    swelling_healing_rate=1.0,
     comp_input_0: Optional[NDArray] = None,
     damage_measure: str = 'viscous_dissipation',
     output_dir: str = 'out',
@@ -810,7 +816,7 @@ def integrate_vc_steps(
             t_0=t_0,
             dt=dt,
             swelling_dmg_growth_rate=swelling_dmg_growth_rate,
-            swelling_healing_rate=swelling_healing_rate
+            swelling_healing_rate=swelling_healing_rate,
         )
         v_0 = v_1
         t_0 = t_1
@@ -831,7 +837,7 @@ def integrate_vc_step(
     dv_max: float = 0.05,
     damage_measure: str = 'viscous_dissipation',
     swelling_dmg_growth_rate: float = 1.0,
-    swelling_healing_rate: float = 1.0
+    swelling_healing_rate: float = 1.0,
 ):
     """
     Integrate the vicious cycle over a single step
@@ -877,17 +883,17 @@ def integrate_vc_step(
         model,
         state_fpath_n,
         damage_measure=damage_measure,
-        swelling_dmg_growth_rate=swelling_dmg_growth_rate
+        swelling_dmg_growth_rate=swelling_dmg_growth_rate,
     )
 
-    dv_dt_n_heal = -swelling_healing_rate*(v_n - 1.0)
+    dv_dt_n_heal = -swelling_healing_rate * (v_n - 1.0)
 
     with sf.StateFile(model, state_fpath_n, mode='r') as f:
         voice_output, info = proc_voice_output(f, len(voice_target))
 
     dv_dt_n = dv_dt_n_swell + dv_dt_n_heal
     max_dv_dt = np.max(np.abs(dv_dt_n))
-    dt_max = dv_max/max_dv_dt
+    dt_max = dv_max / max_dv_dt
 
     dt = min(dt, dt_max)
     dv = dt * dv_dt_n
@@ -907,7 +913,9 @@ def integrate_vc_step(
     print(f"Compensatory input: {comp_input_n}")
     print(f"Post compensation voice output: {voice_output}")
     print(f"Compensation solver stats: {compensation_solver_info}")
-    print(f"(avg/max/min) swelling is ({np.mean(v_1):.4e}, {np.max(v_1):.4e}, {np.min(v_1):.4e})")
+    print(
+        f"(avg/max/min) swelling is ({np.mean(v_1):.4e}, {np.max(v_1):.4e}, {np.min(v_1):.4e})"
+    )
     print(
         "(avg/max/min) Healing-induced swelling rate: "
         f"({np.mean(dv_dt_n_heal):.4e}, {np.max(dv_dt_n_heal):.4e}, {np.min(dv_dt_n_heal):.4e})"
@@ -963,7 +971,9 @@ if __name__ == '__main__':
     parser.add_argument("--overwrite-results", type=str, action='extend', nargs='+')
 
     # Control which damage measure is used for swelling
-    parser.add_argument("--damage-measure", type=str, default='field.tavg_viscous_dissipation')
+    parser.add_argument(
+        "--damage-measure", type=str, default='field.tavg_viscous_dissipation'
+    )
 
     # Voicing time parameters
     parser.add_argument("--dt", type=float, default=5e-5)
@@ -978,7 +988,7 @@ if __name__ == '__main__':
     # The time unit of the vicious cycle is in hours
     # for '--swelling-heal-rate' `0.5` represents a 50% reduction while `5` represents 5 hours
     parser.add_argument("--swelling-dmg-rate", type=float, default=0.0)
-    parser.add_argument("--swelling-heal-rate", type=float, default=-np.log(0.5)/(5))
+    parser.add_argument("--swelling-heal-rate", type=float, default=-np.log(0.5) / (5))
 
     cmd_args = parser.parse_args()
 
@@ -1033,8 +1043,7 @@ if __name__ == '__main__':
 
     base_fname = f'DamageMeasure{cmd_args.damage_measure}--DamageRate{damage_rate:.4e}--HealRate{healing_rate:.4e}--Step'
     fpaths = [
-        f'{cmd_args.output_dir}/{base_fname}{n:d}.h5'
-        for n in range(n_start, n_stop)
+        f'{cmd_args.output_dir}/{base_fname}{n:d}.h5' for n in range(n_start, n_stop)
     ]
 
     if cmd_args.run_vc_sim:
@@ -1076,7 +1085,7 @@ if __name__ == '__main__':
                 dt=1.0,
                 swelling_dmg_growth_rate=damage_rate,
                 swelling_healing_rate=healing_rate,
-                damage_measure=cmd_args.damage_measure
+                damage_measure=cmd_args.damage_measure,
             )
         else:
             resume_integrate_vc(
@@ -1089,7 +1098,7 @@ if __name__ == '__main__':
                 swelling_dmg_growth_rate=damage_rate,
                 swelling_healing_rate=healing_rate,
                 base_fname=base_fname,
-                damage_measure=cmd_args.damage_measure
+                damage_measure=cmd_args.damage_measure,
             )
 
     if cmd_args.postprocess:
