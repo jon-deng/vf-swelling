@@ -816,6 +816,7 @@ def integrate_vc_step(
     t_0: float = 0,
     dt: float = 0.05,
     dv_max: float = 0.05,
+    # TODO: Refactor the swelling rate stuff here into a seperate function
     comp_input_n: Optional[NDArray] = None,
     damage_measure: str = 'viscous_dissipation',
     swelling_dmg_growth_rate: float = 1.0,
