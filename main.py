@@ -370,7 +370,12 @@ def solve_static_swollen_config(
         static_state_n, info = solve_static_swollen_config_stepped(
             model, control, prop, nload=nload
         )
-    return static_state_n, info
+        solve_success = info[f'LoadingStep{nload}']['status']
+
+    if solve_success:
+        return static_state_n, info
+    else:
+        raise RuntimeError("Static state couldn't be solved!")
 
 
 def solve_static_swollen_config_stepped(
