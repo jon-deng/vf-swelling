@@ -372,7 +372,7 @@ def solve_static_swollen_config(
         )
         solve_success = info[f'LoadingStep{nload}']['status']
 
-    if solve_success:
+    if solve_success == 0:
         return static_state_n, info
     else:
         raise RuntimeError("Static state couldn't be solved!")
