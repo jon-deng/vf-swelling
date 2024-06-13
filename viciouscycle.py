@@ -882,11 +882,16 @@ def integrate_vc_step(
 
     with h5py.File(state_fpath_n, mode='a') as f:
         group = f.file.require_group('ViciousCycle')
-        group['damage_rate'] = dmg_rate
-        group['time'] = t_0
-        group['dv_dt_healing'] = dv_dt_n_heal
-        group['dv_dt_damage'] = dv_dt_n_swell
-        group['voice_target'] = voice_target
+        values = {
+            'damage_rate': dmg_rate,
+            'time': t_0,
+            'dv_dt_healing': dv_dt_n_heal,
+            'dv_dt_damage': dv_dt_n_swell,
+            'voice_target': voice_target
+        }
+        for key, value in values.items():
+            if key not in group:
+                group[key] = value
 
     print("-- Found compensatory input for current swelling --")
     print(f"Voice target: {voice_target}")
