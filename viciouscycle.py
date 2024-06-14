@@ -262,7 +262,7 @@ def map_vc_input_to_model_input(
 
     # Compute the swollen static state
     # Use 1 loading step for each 5% swelling increase
-    vmax = np.max(sl_prop['v_swelling'])
+    vmax = np.max(np.abs(sl_prop['v_swelling']))
     nload = int(round(1 / 0.01 * (vmax-1)))
     static_state, static_solve_info = main.solve_static_swollen_config(
         model.solid,
