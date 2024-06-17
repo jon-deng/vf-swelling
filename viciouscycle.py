@@ -417,29 +417,14 @@ def solve_comp_input(
         ini_state, control, prop, _ = map_vc_input_to_model_input(
             model, v, x, const_model_args
         )
+        print((const_ini_state - ini_state).norm())
+        assert (const_ini_state - ini_state).norm() == 0
         _model_args = (ini_state, control, prop)
-
-        # Check whether an existing voicing simulation exists for the current guess
-        existing_voicing_sim = False
-        if path.isfile(fpath):
-            with sf.StateFile(model, fpath, mode='r') as f:
-
-                ext_ini_state = f.get_state(0)
-                ext_control = f.get_control(0)
-                ext_prop = f.get_prop()
-
-                ini_state_err = (ini_state - ext_ini_state).norm()
-                control_err = (control - ext_control).norm()
-                prop_err = (prop - ext_prop).norm()
-
-                if all(np.isclose([ini_state_err, control_err, prop_err], 0)):
-                    existing_voicing_sim = True
 
         # Calculate voice output sensitivity to phonation parameters
         # with a FD approximation
-        if not existing_voicing_sim:
-            with sf.StateFile(model, fpath, mode='w') as f:
-                forward.integrate(model, f, ini_state, [control], prop, voicing_time)
+        with sf.StateFile(model, fpath, mode='w') as f:
+            forward.integrate(model, f, ini_state, [control], prop, voicing_time)
 
         with sf.StateFile(model, fpath, mode='r') as f:
             y = proc_voice_output(f, len(comp_input_0))[0]
