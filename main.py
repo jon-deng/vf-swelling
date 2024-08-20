@@ -263,7 +263,7 @@ def _set_swelling_prop(
     if param['SwellingDistribution'] != 'uniform' and param['vcov'] != 1.0:
         param_unswollen = param.substitute({'vcov': 1.0})
         with h5py.File(f'out/postprocess.h5', mode='a') as f:
-            # damage_key = 'field.tavg_viscous_rate'
+            # damage_key = 'field.tavg_viscous_dissipation'
             damage_key = param['SwellingDistribution']
             group_name = param_unswollen.to_str()
             dataset_name = f'{group_name}/{damage_key}'
@@ -518,7 +518,7 @@ def postprocess_xdmf(model, param: ExpParam, xdmf_path: str, overwrite: bool = F
 
         function_space = dfn.FunctionSpace(mesh, 'DG', 0)
         export_labels = [
-            'field.tavg_viscous_rate',
+            'field.tavg_viscous_dissipation',
             'field.tavg_strain_energy',
             'field.growth_rate',
         ]
@@ -534,7 +534,7 @@ def postprocess_xdmf(model, param: ExpParam, xdmf_path: str, overwrite: bool = F
 
         # Annotate the mesh values with an XDMF file
         xdmf_DG0_labels = [
-            'field.tavg_viscous_rate',
+            'field.tavg_viscous_dissipation',
             'field.tavg_strain_energy',
             'field.growth_rate',
         ]
@@ -615,6 +615,8 @@ def get_result_name_to_postprocess(
 
     proc_strain_energy = slsig.StrainEnergy(model, dx=dx, fspace=fspace_dg0)
 
+    proc_pos_strain_energy_rate = slsig.PositiveStrainEnergyRate(model, dx=dx, fspace=fspace_dg0)
+
     proc_contact_area_density_field = slsig.ContactAreaDensityField(
         model, dx=ds_medial, fspace=fspace_dg0
     )
@@ -656,8 +658,11 @@ def get_result_name_to_postprocess(
         'time.gw': TimeSeries(proc_gw),
         'time.field.p': TimeSeries(slsig.FSIPressure(model)),
         'time.savg_viscous_rate': TimeSeries(proc_visc_rate),
-        'field.tavg_viscous_rate': lambda f: TimeSeriesStats(
+        'field.tavg_viscous_dissipation': lambda f: TimeSeriesStats(
             proc_visc_diss_rate_field
+        ).mean(f, range(f.size // 2, f.size)),
+        'field.tavg_pos_strain_energy_rate': lambda f: TimeSeriesStats(
+            proc_pos_strain_energy_rate
         ).mean(f, range(f.size // 2, f.size)),
         'field.tavg_vm': lambda f: TimeSeriesStats(proc_vm_field).mean(
             f, range(f.size // 2, f.size)
