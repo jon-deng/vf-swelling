@@ -151,7 +151,12 @@ def proc_damage_rate(
                 f, range(f.size // 2, f.size)
             )
             return time_mean
+    elif damage_measure == 'field.tavg_pos_strain_energy_rate':
+        state_measure = slsig.PositiveStrainEnergyRate(model, dx=dx, fspace=fspace)
 
+        def measure(f):
+            time_max = TimeSeriesStats(state_measure).mean(f, range(f.size // 2, f.size))
+            return time_max
     elif damage_measure == 'field.tmax_strain_energy':
         state_measure = slsig.StrainEnergy(model, dx=dx, fspace=fspace)
 
@@ -169,7 +174,7 @@ def proc_damage_rate(
 def proc_swelling_rate(
     model: Model,
     fpath: str,
-    damage_measure: str = 'viscous_dissipation',
+    damage_measure: str = 'field.tavg_viscous_dissipation',
     swelling_dmg_growth_rate: float = 1.0,
 ) -> NDArray:
     """
@@ -608,7 +613,7 @@ def integrate_vc(
     comp_input_0: Optional[NDArray] = None,
     swelling_dmg_growth_rate=1.0,
     swelling_healing_rate=1.0,
-    damage_measure: str = 'viscous_dissipation',
+    damage_measure: str = 'field.tavg_viscous_dissipation',
     output_dir: str = 'out',
     base_fname: str = 'SwellingStep',
 ):
@@ -690,7 +695,7 @@ def resume_integrate_vc(
     n_start: int,
     n_stop: int,
     dv_max: float = 0.05,
-    damage_measure: str = 'viscous_dissipation',
+    damage_measure: str = 'field.tavg_viscous_dissipation',
     dt=1.0,
     swelling_dmg_growth_rate=1.0,
     swelling_healing_rate=1.0,
@@ -765,7 +770,7 @@ def integrate_vc_steps(
     comp_input_0: Optional[NDArray] = None,
     swelling_dmg_growth_rate=1.0,
     swelling_healing_rate=1.0,
-    damage_measure: str = 'viscous_dissipation',
+    damage_measure: str = 'field.tavg_viscous_dissipation',
     output_dir: str = 'out',
     base_fname: str = 'SwellingStep',
 ):
@@ -802,7 +807,7 @@ def integrate_vc_step(
     dt: float = 0.05,
     dv_max: float = 0.05,
     comp_input_n: Optional[NDArray] = None,
-    damage_measure: str = 'viscous_dissipation',
+    damage_measure: str = 'field.tavg_viscous_dissipation',
     swelling_dmg_growth_rate: float = 1.0,
     swelling_healing_rate: float = 1.0,
 ):
