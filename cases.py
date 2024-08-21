@@ -154,7 +154,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                     'psub': 400 * 10,
                     'dt': 5e-5,
                     'tf': 0.5,
-                    'SwellingDistribution': 'field.tavg_viscous_rate',
+                    'SwellingDistribution': 'field.tavg_viscous_dissipation',
                 }
             )
             for vcov in vcovs
@@ -225,7 +225,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         vcovs = np.array([1.0])
         mcovs = np.array([0.0, -0.8, -1.6])
         damage_measures = [
-            'field.tavg_viscous_rate',
+            'field.tavg_viscous_dissipation',
             # 'field.tavg_strain_energy'
         ]
 
@@ -249,7 +249,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         vcovs = np.array([1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3])
         mcovs = np.array([0.0, -0.8, -1.6])
         damage_measures = [
-            'field.tavg_viscous_rate',
+            'field.tavg_viscous_dissipation',
             # 'field.tavg_strain_energy'
         ]
 
@@ -289,7 +289,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         # mesh length scales
         nzs = np.array(np.round(15 * 0.75 / clscales, 0), dtype=int)
         damage_measures = [
-            'field.tavg_viscous_rate',
+            'field.tavg_viscous_dissipation',
             # 'field.tavg_strain_energy'
         ]
 
@@ -316,7 +316,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
         vcovs = np.array([1.0])
         mcovs = np.array([0.0, -0.8])
         psubs = np.array([400 * 10, 410 * 10])
-        damage_measures = ['field.tavg_viscous_rate', 'field.tmax_strain_energy']
+        damage_measures = ['field.tavg_viscous_dissipation', 'field.tavg_pos_strain_energy_rate']
 
         params = [
             make_param(*args)
@@ -338,7 +338,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
 
         vcovs = np.array([1.01, 1.02, 1.03, 1.04, 1.05, 1.06, 1.07])
         mcovs = np.array([0.0, -0.8])
-        damage_measures = ['field.tavg_viscous_rate', 'field.tmax_strain_energy']
+        damage_measures = ['field.tavg_viscous_dissipation', 'field.tavg_pos_strain_energy_rate']
 
         params = [
             make_param(*args)
@@ -363,7 +363,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
 
         vcovs = np.array([1.0, 1.1, 1.2, 1.3])
         mcovs = np.array([0.0, -0.8, -1.6])
-        damage_measures = ['field.tavg_viscous_rate', 'field.tavg_strain_energy']
+        damage_measures = ['field.tavg_viscous_dissipation', 'field.tavg_strain_energy']
 
         params = [
             make_param(*args)
