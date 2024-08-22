@@ -657,7 +657,7 @@ def get_result_name_to_postprocess(
         'time.q': proc_glottal_flow_rate,
         'time.gw': TimeSeries(proc_gw),
         'time.field.p': TimeSeries(slsig.FSIPressure(model)),
-        'time.savg_viscous_rate': TimeSeries(proc_visc_rate),
+        'time.savg_viscous_dissipation': TimeSeries(proc_visc_rate),
         'field.tavg_viscous_dissipation': lambda f: TimeSeriesStats(
             proc_visc_diss_rate_field
         ).mean(f, range(f.size // 2, f.size)),
