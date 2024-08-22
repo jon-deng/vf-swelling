@@ -1,5 +1,15 @@
 """
 This module describes all the simulation cases for the swelling problem
+
+Description of cases
+--------------------
+
+- main_coarse_3D_setup
+    - This is used for the 'linearized swelling analysis'. This case runs simulations with no swelling which is needed to compute damage measures.
+- main_coarse_3D
+    - This is used for the 'linearized swelling analysis'. This case runs simulation with swelling which are distributed based on damage measures computed from the 'main_coarse_3D_setup'
+
+
 """
 
 from typing import List, Tuple, Mapping, Optional, Callable
