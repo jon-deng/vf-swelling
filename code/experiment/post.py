@@ -2,7 +2,7 @@
 Post-process results from simulations
 """
 
-from typing import Mapping, Callable
+from typing import Mapping, Callable, Iterable
 from numpy.typing import NDArray
 
 import numpy as np
@@ -47,6 +47,34 @@ def proc_time(f: sf.StateFile) -> NDArray:
     """
     return f.get_times()
 
+def proc_field_time_statistic(
+    model: Model,
+    f: sf.StateFile,
+    Measure: slsig.BaseFieldMeasure,
+    dx: dfn.Measure,
+    fspace: dfn.FunctionSpace,
+    idxs: Iterable[int],
+    statistic: str='mean'
+) -> NDArray:
+    """
+    Return a single field variable from time-varying fields
+
+    Parameters
+    ----------
+    model: Model
+        The model used to simulate voice outputs
+    f: sf.StateFile
+        The model time history
+    """
+    state_measure = Measure(model, dx=dx, fspace=fspace)
+    if statistic == 'mean':
+        return TimeSeriesStats(state_measure).mean(f, idxs)
+    elif statistic == 'max':
+        return TimeSeriesStats(state_measure).max(f, idxs)
+    elif statistic == 'min':
+        return TimeSeriesStats(state_measure).max(f, idxs)
+    else:
+        raise ValueError(f"Unknown `time_statistic` {statistic}")
 
 def calc_prms(t: NDArray, q: NDArray) -> float:
     """

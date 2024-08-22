@@ -47,7 +47,10 @@ from nonlineq import newton_solve
 from exputils import postprocutils
 
 from experiment.setup import setup_model, setup_state_control_prop
-from experiment.post import get_result_name_to_postprocess, proc_time, proc_glottal_flow_rate, calc_prms
+from experiment import post
+from experiment.post import (
+    get_result_name_to_postprocess, proc_time, proc_glottal_flow_rate, calc_prms
+)
 from experiment.solve import solve_static_swollen_config
 
 Model = coupled.BaseTransientFSIModel
@@ -68,36 +71,24 @@ def proc_damage_rate(
     f: sf.StateFile
         The model time history
     """
-    # TODO: You could/should make `measure` a parameter that's passed in
     dx = model.solid.residual.measure('dx')
     mesh = model.solid.residual.mesh()
     fspace = dfn.FunctionSpace(mesh, 'DG', 0)
+    idxs = range(f.size // 2, f.size)
     if damage_measure == 'field.tavg_viscous_dissipation':
-        state_measure = slsig.ViscousDissipationField(model, dx=dx, fspace=fspace)
-
-        def measure(f):
-            time_mean = TimeSeriesStats(state_measure).mean(
-                f, range(f.size // 2, f.size)
-            )
-            return time_mean
+        return post.proc_field_time_statistic(
+            model, f, slsig.ViscousDissipationField, dx, fspace, idxs, 'mean'
+        )
     elif damage_measure == 'field.tavg_pos_strain_energy_rate':
-        state_measure = slsig.PositiveStrainEnergyRate(model, dx=dx, fspace=fspace)
-
-        def measure(f):
-            time_max = TimeSeriesStats(state_measure).mean(f, range(f.size // 2, f.size))
-            return time_max
+        return post.proc_field_time_statistic(
+            model, f, slsig.PositiveStrainEnergyRate, dx, fspace, idxs, 'mean'
+        )
     elif damage_measure == 'field.tmax_strain_energy':
-        state_measure = slsig.StrainEnergy(model, dx=dx, fspace=fspace)
-
-        def measure(f):
-            time_max = TimeSeriesStats(state_measure).max(f, range(f.size // 2, f.size))
-            return time_max
-
+        return post.proc_field_time_statistic(
+            model, f, slsig.StrainEnergy, dx, fspace, idxs, 'max'
+        )
     else:
         raise ValueError(f"Unknown damage measure '{damage_measure}'")
-
-    damage = measure(f)
-    return damage
 
 def proc_swelling_rate(
     model: Model,
