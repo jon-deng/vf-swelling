@@ -614,7 +614,7 @@ def integrate_vc(
     swelling_dmg_growth_rate=1.0,
     swelling_healing_rate=1.0,
     damage_measure: str = 'field.tavg_viscous_dissipation',
-    output_dir: str = 'out',
+    output_dir: str = '../out',
     base_fname: str = 'SwellingStep',
 ):
     """
@@ -699,7 +699,7 @@ def resume_integrate_vc(
     dt=1.0,
     swelling_dmg_growth_rate=1.0,
     swelling_healing_rate=1.0,
-    output_dir: str = 'out',
+    output_dir: str = '../out',
     base_fname: str = 'SwellingStep',
 ):
     """
@@ -771,7 +771,7 @@ def integrate_vc_steps(
     swelling_dmg_growth_rate=1.0,
     swelling_healing_rate=1.0,
     damage_measure: str = 'field.tavg_viscous_dissipation',
-    output_dir: str = 'out',
+    output_dir: str = '../out',
     base_fname: str = 'SwellingStep',
 ):
     for n in tqdm(range(n_start, n_stop), desc='Vicious cycle integration'):
@@ -942,7 +942,7 @@ if __name__ == '__main__':
     parser.add_argument("--postprocess", action='store_true')
 
     # Where/how to write results
-    parser.add_argument("--output-dir", type=str, default='out/vicious_cycle')
+    parser.add_argument("--output-dir", type=str, default='../out/vicious_cycle')
     parser.add_argument("--overwrite-results", type=str, action='extend', nargs='+')
 
     # Control which damage measure is used for swelling

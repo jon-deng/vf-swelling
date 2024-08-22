@@ -219,7 +219,7 @@ def _set_swelling_prop(
     cellregion_to_sdof: Mapping[str, NDArray],
     modify_density=True,
     modify_geometry=True,
-    out_dir='out',
+    out_dir='../out',
 ) -> bv.BlockVector:
     """
     Set properties related to the level of swelling
@@ -262,7 +262,7 @@ def _set_swelling_prop(
     ## TODO : Fix this ad-hoc thing to do the swelling based on damage
     if param['SwellingDistribution'] != 'uniform' and param['vcov'] != 1.0:
         param_unswollen = param.substitute({'vcov': 1.0})
-        with h5py.File(f'out/postprocess.h5', mode='a') as f:
+        with h5py.File(f'../out/postprocess.h5', mode='a') as f:
             # damage_key = 'field.tavg_viscous_dissipation'
             damage_key = param['SwellingDistribution']
             group_name = param_unswollen.to_str()
@@ -492,8 +492,8 @@ def postprocess_xdmf(model, param: ExpParam, xdmf_path: str, overwrite: bool = F
     xdmf_data_basename = f'{path.splitext(xdmf_basename)[0]}.h5'
     xdmf_data_path = path.join(xdfm_data_dir, xdmf_data_basename)
     with (
-        h5py.File(f'out/{param.to_str()}.h5', mode='r') as fstate,
-        h5py.File(f'out/postprocess.h5', mode='r') as fpost,
+        h5py.File(f'../out/{param.to_str()}.h5', mode='r') as fstate,
+        h5py.File(f'../out/postprocess.h5', mode='r') as fpost,
         h5py.File(xdmf_data_path, mode='w') as fxdmf,
     ):
         # breakpoint()
@@ -708,7 +708,7 @@ if __name__ == '__main__':
     parser = ap.ArgumentParser()
     parser.add_argument("--num-proc", type=int, default=1)
     parser.add_argument("--study-name", type=str, default='none')
-    parser.add_argument("--output-dir", type=str, default='out')
+    parser.add_argument("--output-dir", type=str, default='../out')
     parser.add_argument("--overwrite-results", type=str, action='extend', nargs='+')
     # parser.add_argument("--default-dt", type=float, default=1.25e-5)
     # parser.add_argument("--default-tf", type=float, default=0.5)
