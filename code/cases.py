@@ -163,7 +163,7 @@ def make_exp_params(study_name: str) -> List[ExpParam]:
                     'mcov': 0.0,
                     'psub': 400 * 10,
                     'dt': 5e-5,
-                    'tf': 0.5,
+                    'tf': 3*5e-5,
                     'SwellingDistribution': 'field.tavg_viscous_dissipation',
                 }
             )

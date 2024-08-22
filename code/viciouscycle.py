@@ -28,7 +28,6 @@ from numpy.typing import NDArray
 
 from tqdm import tqdm
 from argparse import ArgumentParser
-import warnings
 import functools
 
 import numpy as np
@@ -41,88 +40,18 @@ from femvf.postprocess import solid as slsig
 from femvf.models.transient import coupled
 from blockarray import blockvec as bv
 
-from scipy import signal
-from vfsig import clinical, fftutils, modal
+from vfsig import modal
 
 from nonlineq import newton_solve
 
 from exputils import postprocutils
 
-import main
-from main import proc_glottal_flow_rate
+from experiment.setup import setup_model, setup_state_control_prop
+from experiment.post import get_result_name_to_postprocess, proc_time, proc_glottal_flow_rate, calc_prms
+from experiment.solve import solve_static_swollen_config
 
 Model = coupled.BaseTransientFSIModel
 SolverInfo = Mapping[str, Any]
-
-
-def proc_time(f: sf.StateFile) -> NDArray:
-    """
-    Return the simulation time vector
-    """
-    return f.get_times()
-
-
-def proc_voice_output(f: sf.StateFile, n: int) -> Tuple[NDArray, Mapping[str, NDArray]]:
-    """
-    Return voice outputs (RMS pressure, fundamental frequency)
-    """
-    t = proc_time(f)
-    q = proc_glottal_flow_rate(f)
-
-    # Truncate part of the flow rate signal to a steady state portion
-    idx_trunc = slice(t.size // 2, t.size)
-    t_trunc = t[idx_trunc]
-    q_trunc = q[idx_trunc]
-
-    dt = t[1] - t[0]
-    fund_freq, fund_phase, dfreq, dphase, info = modal.fundamental_mode_from_peaks(
-        q, dt, height=np.max(q) * 0.8
-    )
-    if len(info['peaks']) < 2:
-        fund_freq = 0.0
-
-    prms = calc_prms(t_trunc, q_trunc) / 10
-
-    _voice_output = (prms, fund_freq)
-    # voice_output = np.array([prms, fund_freq])
-    voice_output = np.array(_voice_output[:n])
-    return voice_output, {'t': t, 'q': q}
-
-
-def calc_prms(t: NDArray, q: NDArray) -> float:
-    """
-    Return the RMS radiated pressure at 1 m using a piston-in-baffle approximation
-    """
-    # t = SIGNALS[f'{case_name}/time']
-    # q = SIGNALS[f'{case_name}/q']
-    dt = t[1] - t[0]
-
-    # Assume a 2cm vocal fold length
-    # This is needed to get a true flow rate since the 1D model flow rate
-    # is over one dimension
-    piston_params = {
-        'r': 100.0,
-        'theta': 0.0,
-        'a': 1.0,
-        'rho': 0.001225,
-        'c': 343 * 100,
-    }
-    VF_LENGTH = 2
-    win = signal.windows.tukey(q.size, alpha=0.15)
-    wq = win * q * VF_LENGTH
-    fwq = np.fft.rfft(wq)
-    freq = np.fft.rfftfreq(wq.size, d=dt)
-
-    fwp = clinical.prad_piston(fwq, f=freq * 2 * np.pi, piston_params=piston_params)
-
-    # This computes the squared sound pressure
-    psqr = fftutils.power_from_rfft(fwp, fwp, n=fwq.size)
-
-    # The rms pressure in units of Pa
-    prms = np.sqrt(psqr / fwp.size)
-
-    return prms
-
 
 def proc_damage_rate(
     model: Model,
@@ -170,7 +99,6 @@ def proc_damage_rate(
     damage = measure(f)
     return damage
 
-
 def proc_swelling_rate(
     model: Model,
     fpath: str,
@@ -206,6 +134,32 @@ def proc_swelling_rate(
 
     swelling_rate = swelling_dmg_growth_rate * dmg_rate
     return swelling_rate, dmg_rate
+
+def proc_voice_output(f: sf.StateFile, n: int) -> Tuple[NDArray, Mapping[str, NDArray]]:
+    """
+    Return voice outputs (RMS pressure, fundamental frequency)
+    """
+    t = proc_time(f)
+    q = proc_glottal_flow_rate(f)
+
+    # Truncate part of the flow rate signal to a steady state portion
+    idx_trunc = slice(t.size // 2, t.size)
+    t_trunc = t[idx_trunc]
+    q_trunc = q[idx_trunc]
+
+    dt = t[1] - t[0]
+    fund_freq, fund_phase, dfreq, dphase, info = modal.fundamental_mode_from_peaks(
+        q, dt, height=np.max(q) * 0.8
+    )
+    if len(info['peaks']) < 2:
+        fund_freq = 0.0
+
+    prms = calc_prms(t_trunc, q_trunc) / 10
+
+    _voice_output = (prms, fund_freq)
+    # voice_output = np.array([prms, fund_freq])
+    voice_output = np.array(_voice_output[:n])
+    return voice_output, {'t': t, 'q': q}
 
 
 def map_vc_input_to_model_input(
@@ -269,7 +223,7 @@ def map_vc_input_to_model_input(
     # Use 1 loading step for each 5% swelling increase
     vmax = np.max(np.abs(sl_prop['v_swelling']))
     nload = int(round(1 / 0.01 * (vmax-1)))
-    static_state, static_solve_info = main.solve_static_swollen_config(
+    static_state, static_solve_info = solve_static_swollen_config(
         model.solid,
         sl_control,
         sl_prop,
@@ -924,7 +878,7 @@ def postprocess(
                 f.require_group(case_name),
                 in_fpath,
                 lambda name: model,
-                main.get_result_name_to_postprocess,
+                get_result_name_to_postprocess,
                 num_proc=num_proc,
                 overwrite_results=overwrite_results,
             )
@@ -988,26 +942,7 @@ if __name__ == '__main__':
             'SwellDamageRate': cmd_args.swelling_dmg_rate,
         }
     )
-    # param = main.ExpParam(
-    #     {
-    #         'MeshName': cases.MESH_BASE_NAME,
-    #         'clscale': 0.94,
-    #         'GA': 3,
-    #         'DZ': 1.5,
-    #         'NZ': 12,
-    #         'Ecov': cases.ECOV,
-    #         'Ebod': cases.EBOD,
-    #         'vcov': 1,
-    #         'mcov': 0.0,
-    #         'psub': 400 * 10,
-    #         'dt': 5e-5,
-    #         'tf': 0.50,
-    #         'ModifyEffect': '',
-    #         'SwellingDistribution': 'uniform',
-    #         'SwellingModel': 'power',
-    #     }
-    # )
-    model = main.setup_model(param)
+    model = setup_model(param)
 
     dv = cmd_args.dv
     n_start = cmd_args.nstart
@@ -1028,7 +963,7 @@ if __name__ == '__main__':
                 f"Some existing files, {fpaths[1:]}, would be overwritten."
             )
 
-        const_ini_state, const_controls, const_prop = main.setup_state_control_prop(
+        const_ini_state, const_controls, const_prop = setup_state_control_prop(
             param, model
         )
 
