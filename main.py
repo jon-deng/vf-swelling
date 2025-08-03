@@ -43,7 +43,7 @@ def run(param: dict, out_dir: str):
     param = ExpParam(param)
     out_path = f'{out_dir}/{param.to_str()}.h5'
     if not path.isfile(out_path):
-        model = setup_model(param)
+        model = setup_model(param, 'mesh')
         state0, controls, prop = setup_state_control_prop(param, model)
         # breakpoint()
 
@@ -182,7 +182,7 @@ def get_model(in_fpath: str) -> Model:
     """Return the model"""
     in_fname = path.splitext(path.split(in_fpath)[-1])[0]
     param = ExpParam(in_fname)
-    return setup_model(param)
+    return setup_model(param, 'mesh')
 
 
 if __name__ == '__main__':
@@ -230,7 +230,7 @@ if __name__ == '__main__':
             )
             # xdmf_path = 'temp.xdmf'
 
-            model = setup_model(param)
+            model = setup_model(param, 'mesh')
             postprocess_xdmf(model, param, xdmf_path)
             # if not path.isfile(out_fpath):
             # else:

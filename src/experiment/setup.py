@@ -37,7 +37,7 @@ def setup_mesh_name(param: ExpParam) -> str:
     return f'{base_name}--GA{ga:.2f}--DZ{dz:.2e}--NZ{nz:d}--CL{clscale:.2e}'
 
 
-def setup_model(param: ExpParam, mesh_dir='../mesh') -> Model:
+def setup_model(param: ExpParam, mesh_dir: str) -> Model:
     """
     Return the model
     """

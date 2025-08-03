@@ -933,7 +933,7 @@ if __name__ == '__main__':
             'SwellDamageRate': cmd_args.swelling_dmg_rate,
         }
     )
-    model = setup_model(param)
+    model = setup_model(param, 'mesh')
 
     dv = cmd_args.dv
     n_start = cmd_args.nstart
