@@ -2,6 +2,7 @@
 Run a sequence of vocal fold simulations with swelling
 """
 
+import sys
 from typing import List, Optional
 from numpy.typing import NDArray
 
@@ -21,6 +22,7 @@ from exputils import postprocutils
 
 from cases import ExpParam, make_exp_params
 
+sys.path.append('src')
 from experiment.setup import setup_model, setup_state_control_prop
 from experiment.post import get_result_name_to_postprocess
 
