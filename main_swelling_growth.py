@@ -23,6 +23,7 @@ target voice condition $f_\mathrm{target}$.
 .. math:: \dot{v} \propto \dot{\alpha}(p_\mathrm{sub}(v, f_\mathrm{target}), E(v, f_\mathrm{target}), v, \ellipsis).
 """
 
+import sys
 from typing import Any, Mapping, Tuple, Optional, Union, List
 from numpy.typing import NDArray
 
@@ -46,6 +47,7 @@ from nonlineq import newton_solve
 
 from exputils import postprocutils
 
+sys.path.append('src')
 from experiment.setup import setup_model, setup_state_control_prop
 from experiment import post
 from experiment.post import (
@@ -887,7 +889,7 @@ if __name__ == '__main__':
     parser.add_argument("--postprocess", action='store_true')
 
     # Where/how to write results
-    parser.add_argument("--output-dir", type=str, default='../out/vicious_cycle')
+    parser.add_argument("--output-dir", type=str, default='out/vicious_cycle')
     parser.add_argument("--overwrite-results", type=str, action='extend', nargs='+')
 
     # Control which damage measure is used for swelling
